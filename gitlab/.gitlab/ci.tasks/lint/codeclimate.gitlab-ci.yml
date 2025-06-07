@@ -1,0 +1,27 @@
+---
+codeclimate:
+  stage: lint
+  image: docker:latest
+  allow_failure: true
+  variables:
+    DOCKER_DRIVER: overlay2
+    DOCKER_TLS_CERTDIR: ""
+  services:
+    - docker:dind
+  rules:
+    - if: $DO_CI == 'false'
+      when: never
+    - if: $CI_COMMIT_BRANCH == 'synchronize'
+      when: never
+    - if: '$CI_COMMIT_TAG || $CI_COMMIT_BRANCH'
+  needs: []
+  script:
+    - export NO_INSTALL_HOMEBREW=true
+    - apk add bash
+    - bash start.sh
+    - source "$HOME/.profile"
+    - task ci:codeclimate
+  dependencies: []
+  artifacts:
+    reports:
+      codequality: gl-code-quality-report.json

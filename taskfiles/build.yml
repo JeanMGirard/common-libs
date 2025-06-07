@@ -1,0 +1,756 @@
+---
+version: '3'
+
+vars:
+  BINARY_BUILD_FOLDER: dist/bin
+  BUILD_FOLDERS: build coverage dist
+
+tasks:
+  create:
+    deps:
+      - :install:software:jq
+    log:
+      error: Error creating production `node_modules/` pack
+      start: Creating production `node_modules/` pack
+      success: Successfully created production `node_modules/` pack
+    cmds:
+      - |
+        if [ -d node_modules ]; then
+          mv node_modules node_modules.bak
+        fi
+      - task: install
+      - task: minify
+      - task: pack
+      - rm package-lock.json
+      - |
+        if [ -d node_modules.bak ]; then
+          rm -rf node_modules
+          mv node_modules.bak node_modules
+        fi
+    status:
+      - '[ $(jq -r ".dependencies | length" package.json) == "0" ]'
+  install:
+    deps:
+      - :install:software:node
+    log:
+      error: Encountered error while running `npm install --only=prod`
+      start: Installing production `node_modules/`
+      success: Successfully set-up production `node_modules/` folder
+    cmds:
+      - SKIP_NPM_START=true npm install --only=prod
+  minify:
+    deps:
+      - :install:go:node-prune
+      - :install:npm:modclean
+    summary: |
+      ## node-prune
+
+      `node-prune` is a Go project that does a good job at cleaning up projects while
+      remaining safe.
+
+      ## modclean
+
+      `modclean` does what `node-prune` does and takes it a step further.
+
+      `modclean` provides 3 different patterns by default. They are:
+
+      * `default:safe` - Contains patterns that are considered safe and should not
+      affect your application. It also removes the most files/folders of all the configurations.
+      * `default:caution` - Contains patterns that could potentially cause issues with
+      modules, but includes patterns that will help reduce your modules folder size.
+      * `default:danger` - Contains patterns that are known to cause issues with certain
+      modules, but can help reduce files and your modules folder size even further.
+
+      **To clean with `default:safe` and `default:caution`, you can run:**
+      `task npm:bundle:minify -- default:safe,default:caution
+
+      **To clean with all of them:**
+      `task npm:bundle:minify -- default:*`
+
+      If CLI arguments are not passed, then the task looks at `.blueprint.modcleanPatterns` in `package.json`
+      for the patterns. And if that is not present, then `default:safe,default:caution` is used by default.
+
+      You can see the [default patterns here](https://github.com/ModClean/modclean-patterns-default/blob/master/patterns.json).
+    vars:
+      MODCLEAN_PATTERNS:
+        sh: |
+          {{if .CLI_ARGS}}echo '{{.CLI_ARGS}}'{{else}}PREFERENCE="$(jq -r '.blueprint.modcleanPatterns' package.json)"
+          if [ "$PREFERENCE" != 'null' ]; then
+            echo "$PREFERENCE"
+          else
+            echo "default:safe,default:caution"
+          fi{{end}}
+    log:
+      error: Encountered error while pruning production `node_modules/` folder
+      start: Pruning production `node_modules/` folder
+      success: Successfully pruned production `node_modules/` folder
+    cmds:
+      - node-prune
+      - modclean --patterns="{{.MODCLEAN_PATTERNS}}" --run
+  pack:
+    deps:
+      - :install:npm:pac
+    log:
+      error: Error compressing production `node_modules/` into `.tgz` files stored in the `.modules/` folder
+      start: Packing production `node_modules/` into `.tgz` files stored in the `.modules/` folder
+      success: Finished packing production `node_modules/` into the `.modules/` folder
+    cmds:
+      - mkdir -p .modules
+      - .config/log info '`pac` is being replaced by `produndle` - WIP' || produndle pack
+  unpack:
+    deps:
+      - :install:software:jq
+    cmds:
+      - task: unpack:pac
+    status:
+      - '[ ! -d .modules ] || ([ -d .modules ] && (! ls .modules | grep .tgz))'
+  unpack:pac:
+    deps:
+      - :install:npm:pac
+    log:
+      error: Error running `unpack:pac`
+      start: Populating `node_modules/` with `.tgz` files in the `.modules` folder
+      success: Finished populating `node_modules/` folder
+    cmds:
+      - .config/log info '`pac` is being replaced by `produndle` - WIP' || produndle unpack
+      - |
+        BASE_DIR="$(PWD)"
+        for MODULE in node_modules/*; do
+          cd "$MODULE"
+          if [ -f Taskfile.yml ]; then
+            task unpack || EXIT_CODE=$?
+            if [ -n "$EXIT_CODE" ]; then
+              "${PWD}/.config/log" warn 'There was an error running `task unpack` in '"$MODULE"
+            fi
+          fi
+        done
+
+
+  build:
+    deps:
+      - :install:modules:local
+      - :install:npm:esbuild
+      - :install:npm:nest
+      - clean
+    desc: Build the application
+    log:
+      error: Error building the application
+      start: Building the application
+      success: Successfully built the application
+    cmds:
+      - task: depcheck:dependencies
+      - mkdir -p dist
+      - task: build:compile
+  build:all:
+    deps:
+      - build:ansible
+      - build:docker
+      - build:go
+      - build:npm
+      - build:packer
+      - build:python
+  build:compile:
+    deps:
+      - build:nest
+      - build:esbuild:bundled
+      - build:esbuild:minified
+      - build:fpm
+  build:esbuild:bundled:
+    deps:
+      - :install:modules:local
+      - :install:npm:esbuild
+    log:
+      error: Error running `esbuild` (config -> ./.config/esbuild/bundled.js)
+      start: Running `esbuild` with bundle script (config -> ./.config/esbuild/bundled.js)
+      success: Finished running `esbuild` (config -> ./.config/esbuild/bundled.js)
+    cmds:
+      - node .config/esbuild/bundled.js
+  build:esbuild:minified:
+    deps:
+      - :install:modules:local
+      - :install:npm:esbuild
+    log:
+      error: Error running `esbuild` (config -> ./.config/esbuild/minified.js)
+      start: Running `esbuild` with minify script (config -> ./.config/esbuild/minified.js)
+      success: Finished running `esbuild with minify script (config -> ./.config/esbuild/minified.js)
+    cmds:
+      - node .config/esbuild/minified.js
+  build:ansible:
+    cmds:
+      - task: :build
+    status:
+      - '[ -z "$RELEASE_ANSIBLE" ]'
+  build:docker:
+    cmds:
+      - task: :build
+    status:
+      - '[ -z "$RELEASE_DOCKER" ]'
+  build:go:
+    deps:
+      - build:go:deps
+    cmds:
+      - task: :build
+    status:
+      - '[ -z "$RELEASE_GO" ]'
+  build:go:deps:
+    deps:
+      - :docker:login
+      - :install:go:goreleaser
+      - :install:go:nfpm
+      - :install:software:go
+      - :install:software:snapcraft
+  build:npm:
+    deps:
+      - build:npm:deps
+    cmds:
+      - task: :build
+    status:
+      - '[ -z "$RELEASE_NPM" ]'
+  build:npm:deps:
+    deps:
+      - build:npm:deps:go
+  build:npm:deps:go:
+    cmds:
+      - task: build:go:deps
+    status:
+      - '[ "{{.REPOSITORY_SUBTYPE}}" != "cli" ]'
+  build:packer:
+    cmds:
+      - task: :build
+    status:
+      - '[ -z "$RELEASE_PACKER" ]'
+  build:python:
+    cmds:
+      - task: :build
+    status:
+      - '[ -z "$RELEASE_PYTHON" ]'
+
+  build:fpm:
+    deps:
+      - :install:software:jq
+    vars:
+      NPM_PACKAGE_NAME:
+        sh: jq -r '.blueprint.binName' package.json
+      NPM_PACKAGE_VERSION:
+        sh: jq -r '.version' package.json
+    cmds:
+      - task: build:fpm-build
+        vars:
+          NPM_PACKAGE_NAME: '{{.NPM_PACKAGE_NAME}}'
+          NPM_PACKAGE_VERSION: '{{.NPM_PACKAGE_VERSION}}'
+  build:fpm:build:
+    deps:
+      - task: build:fpm:compile
+        vars:
+          ARCHITECTURE: amd64
+          FILE_EXTENSION: deb
+          FPM_TARGET: deb
+          NPM_PACKAGE_NAME: '{{.NPM_PACKAGE_NAME}}'
+          NPM_PACKAGE_VERSION: '{{.NPM_PACKAGE_VERSION}}'
+          SYSTEM: debian
+      - task: build:fpm:compile
+        vars:
+          ARCHITECTURE: arm64
+          FILE_EXTENSION: deb
+          FPM_TARGET: deb
+          NPM_PACKAGE_NAME: '{{.NPM_PACKAGE_NAME}}'
+          NPM_PACKAGE_VERSION: '{{.NPM_PACKAGE_VERSION}}'
+          SYSTEM: debian
+      - task: build:fpm:compile
+        vars:
+          ARCHITECTURE: amd64
+          FILE_EXTENSION: txz
+          FPM_TARGET: freebsd
+          NPM_PACKAGE_NAME: '{{.NPM_PACKAGE_NAME}}'
+          NPM_PACKAGE_VERSION: '{{.NPM_PACKAGE_VERSION}}'
+          SYSTEM: freebsd
+      # - task: build:fpm:compile
+      #   vars:
+      #     ARCHITECTURE: amd64
+      #     FILE_EXTENSION:
+      #     FPM_TARGET: pacman
+      #     NPM_PACKAGE_NAME: '{{.NPM_PACKAGE_NAME}}'
+      #     NPM_PACKAGE_VERSION: '{{.NPM_PACKAGE_VERSION}}'
+      #     SYSTEM: archlinux
+      - task: build:fpm:compile
+        vars:
+          ARCHITECTURE: amd64
+          FILE_EXTENSION: rpm
+          FPM_TARGET: rpm
+          NPM_PACKAGE_NAME: '{{.NPM_PACKAGE_NAME}}'
+          NPM_PACKAGE_VERSION: '{{.NPM_PACKAGE_VERSION}}'
+          SYSTEM: redhat
+      - task: build:fpm:compile
+        vars:
+          ARCHITECTURE: arm64
+          FILE_EXTENSION: rpm
+          FPM_TARGET: rpm
+          NPM_PACKAGE_NAME: '{{.NPM_PACKAGE_NAME}}'
+          NPM_PACKAGE_VERSION: '{{.NPM_PACKAGE_VERSION}}'
+          SYSTEM: redhat
+      - task: build:fpm:compile
+        vars:
+          ARCHITECTURE: all
+          FILE_EXTENSION: tar
+          FPM_TARGET: tar
+          NPM_PACKAGE_NAME: '{{.NPM_PACKAGE_NAME}}'
+          NPM_PACKAGE_VERSION: '{{.NPM_PACKAGE_VERSION}}'
+          SYSTEM: source
+    log:
+      error: Encountered error while building binaries with FPM
+      start: Building binaries with FPM
+      success: Successfully built binaries with FPM
+    cmds:
+      - |
+        .config/log success 'Running gzip on `{{.NPM_PACKAGE_NAME}}-{{.NPM_PACKAGE_VERSION}}-source-all.tar`'
+        gzip -9 {{.NPM_PACKAGE_NAME}}-{{.NPM_PACKAGE_VERSION}}-source-all.tar
+
+  build:fpm:compile:
+    deps:
+      - :install:software:fpm
+    log:
+      error: Encountered error while compiling {{.ARCHITECTURE}} {{.FPM_TARGET}} binary with FPM for {{.NPM_PACKAGE_NAME}}, version {{.NPM_PACKAGE_VERSION}}
+      start: Compiling {{.ARCHITECTURE}} {{.FPM_TARGET}} binary with FPM for {{.NPM_PACKAGE_NAME}}, version {{.NPM_PACKAGE_VERSION}}
+      success: Finished compiling {{.ARCHITECTURE}} {{.FPM_TARGET}} binary with FPM for {{.NPM_PACKAGE_NAME}}, version {{.NPM_PACKAGE_VERSION}}
+    cmds:
+      - >
+        {{.NPX_HANDLE}}fpm -s npm -t {{.FPM_TARGET}}
+        -p {{.BINARY_BUILD_FOLDER}}/{{.NPM_PACKAGE_NAME}}-{{.NPM_PACKAGE_VERSION}}-{{.SYSTEM}}-{{.ARCHITECTURE}}.{{.FILE_EXTENSION}}
+        --architecture {{.ARCHITECTURE}} .
+
+  build:nest:
+    deps:
+      - :install:modules:local
+      - :install:npm:nest
+    log:
+      error: Encountered error while building NestJS project
+      start: Building NestJS project
+      success: Finished building NestJS project
+    cmds:
+      - '{{.NPX_HANDLE}}nest build'
+      - task: build:nest:after
+  build:nest:after:
+    deps:
+      - :common:update:man-page
+      - build:pkg
+  build:none:
+    log:
+      start: Skipping build step because project does not need building
+    cmds:
+      - task: :donothing
+  build:pkg:
+    deps:
+      - :install:modules:local
+      - :install:npm:pkg
+    log:
+      error: Encountered error while generating standalone executables for macOS, Linux, and Windows using `pkg`
+      start: Generating standalone executables for macOS, Linux, and Windows using `pkg`
+      success: Generated standalone executables for macOS, Linux, and Windows using `pkg`
+    cmds:
+      - '{{.NPX_HANDLE}}pkg package.json'
+  build:release: 'true'
+  build:tsconfig:
+    deps:
+      - :install:npm:typescript
+    log:
+      error: Error building with `tsconfig.json`
+      start: Removing `dist/` folder and running `tsc -p tsconfig.json`
+      success: Successfully built project
+    cmds:
+      - rm -rf dist
+      - tsc -p tsconfig.json
+  clean:
+    deps:
+      - :install:software:rsync
+    desc: Remove temporary folders that might conflicts with builds
+    vars:
+      RANDOM_STRING:
+        sh: openssl rand -hex 14
+    log:
+      error: Error removing `{{.BUILD_FOLDERS}}` with rsync
+      start: Removing `{{.BUILD_FOLDERS}}` with rsync
+      success: Successfully removed `{{.BUILD_FOLDERS}}`
+    cmds:
+      - mkdir -p '/tmp/{{.RANDOM_STRING}}'
+      - mkdir -p '/tmp/{{.RANDOM_STRING}}-empty'
+      - |
+        for TMP_FILE in {{.BUILD_FOLDERS}}; do
+          if [ -d "$TMP_FILE" ]; then
+            mv "$TMP_FILE" "/tmp/{{.RANDOM_STRING}}/$TMP_FILE" 2> /dev/null
+            (rsync -a --delete '/tmp/{{.RANDOM_STRING}}-empty' "/tmp/{{.RANDOM_STRING}}/$TMP_FILE" && rm -rf "/tmp/{{.RANDOM_STRING}}-$TMP_FILE") &
+          fi
+        done
+        wait
+
+  config:
+    deps:
+      - :install:software:jq
+      - :install:software:node
+    vars:
+      REGISTRY_ADDRESS:
+        sh: jq -r '.publishConfig["@gitlab:registry"]' package.json | sed 's/^https://'
+    cmds:
+      - npm config set -- '//registry.npmjs.org/:_authToken' '${NPM_TOKEN}' '{{.REGISTRY_ADDRESS}}:_authToken' '${GITLAB_TOKEN}'
+  depcheck:dependencies:
+    deps:
+      - :install:npm:depcheck
+      - :install:software:jq
+    desc: Remove unused dependencies
+    log:
+      error: Error uninstalling unused dependencies in package.json
+      start: Uninstalling unused dependencies in package.json
+      success: Successfully uninstalled unused dependencies in package.json
+    cmds:
+      - |
+        {{.NPX_HANDLE}}depcheck --json | jq -r '.dependencies[]' | xargs -n1 {{.NPM_PROGRAM_LOCAL}} uninstall --save
+
+  preinstall:
+    deps:
+      - :install:npm:only-allow
+    log:
+      error: '`pnpm` must be used as the package manager'
+      start: Forcing `pnpm` as the package manager by running `only-allow pnpm`
+      success: Successfully enforced `pnpm` as the package manager
+    cmds:
+      - only-allow pnpm
+  prepare:
+    cmds:
+      - task: prepare:project
+      - task: prepare:release
+  prepare:project:
+    cmds:
+      - task: :common:husky
+    status:
+      - '[ -n "$CI" ] || [ -n "$SEMANTIC_RELEASE" ]'
+  prepare:prune:
+    cmds:
+      - task: prune
+    status:
+      - '! type node-prune &> /dev/null'
+  prepare:release:
+    cmds:
+      - 'true'
+    status:
+      - '[ -z "$SEMANTIC_RELEASE" ]'
+  prune:
+    deps:
+      - :install:go:node-prune
+    log:
+      error: Error pruning `node_modules/`
+      start: Pruning the `node_modules/` folder
+      success: Successfully pruned the `node_modules/` folder
+    cmds:
+      - node-prune
+  publish:gitlab:
+    deps:
+      - :install:software:jq
+      - :install:software:node
+      - :npm:config
+    vars:
+      PKG_NAME:
+        sh: jq -r '.name' package.json
+      REGISTRY_ADDRESS:
+        sh: jq -r '.publishConfig["@gitlab:registry"]' package.json
+      VERSION:
+        sh: jq -r '.version' package.json
+    env:
+      BACKUP_PKG:
+        sh: mktemp
+    cmds:
+      - cp package.json "$BACKUP_PKG"
+      - TMP="$(mktemp)" && jq '.name = "@gitlab/{{.PKG_NAME}}" | .publishConfig.access = "restricted"' package.json > "$TMP" && mv "$TMP" package.json
+      - npm publish
+      - npm dist-tag --registry={{.REGISTRY_ADDRESS}} add {{.PKG_NAME}}@{{.VERSION}} latest
+      - mv "$BACKUP_PKG" package.json
+    status:
+      - '[ "$(jq -r ".publishConfig[\"@gitlab:registry\"] | type" package.json)" != "string" ] || [ -z "$NPM_PUBLISH_GITLAB" ]'
+  start:
+    deps:
+      - :install:modules:local
+      - :install:npm:nest
+    desc: Run the application
+    log:
+      error: Encountered error while running `{{.NPX_HANDLE}}nest start`
+      start: Running `{{.NPX_HANDLE}}nest start`
+      success: Successfully ran `{{.NPX_HANDLE}}nest start`
+    cmds:
+      - '{{.NPX_HANDLE}}nest start'
+  start:debug:
+    deps:
+      - :install:modules:local
+      - :install:npm:nest
+    log:
+      error: Encountered error while running `{{.NPX_HANDLE}}nest start --watch`
+      start: Running `{{.NPX_HANDLE}}nest start --watch`
+      success: Successfully ran `{{.NPX_HANDLE}}nest start --watch`
+    cmds:
+      - '{{.NPX_HANDLE}}nest start --watch'
+  start:inspect:
+    deps:
+      - :install:modules:local
+      - :install:npm:ndb
+      - :install:npm:nodemon
+      - :install:npm:ts-node
+    desc: Run the application in `watch` mode and open DevTools
+    log:
+      error: Error encountered while running `{{.NPX_HANDLE}}ndb nest start --watch`
+      start: Running `{{.NPX_HANDLE}}ndb nest start --watch`
+      success: Successfully ran `{{.NPX_HANDLE}}ndb nest start --watch`
+    cmds:
+      - '{{.NPX_HANDLE}}ndb nest start --watch'
+  start:inspect:legacy:
+    deps:
+      - :install:modules:local
+      - :install:npm:nest
+    log:
+      error: Encountered error while running `{{.NPX_HANDLE}}nest start --debug --watch`
+      start: Running `{{.NPX_HANDLE}}nest start --debug --watch`
+      success: Successfully ran `{{.NPX_HANDLE}}nest start --debug --watch`
+    cmds:
+      - '{{.NPX_HANDLE}}nest start --debug --watch'
+  start:prod:
+    deps:
+      - :install:modules:local
+      - :install:npm:nest
+    desc: Run the application in `production` mode
+    log:
+      error: Error encountered while building and running `node dist/main`
+      start: Running `production` build by building the project and then running `node dist/main`
+      success: Successfully ran `production` build
+    cmds:
+      - task: build
+      - node dist/main
+  start:prod:inspect:
+    deps:
+      - :install:modules:local
+      - :install:npm:nest
+    desc: Run the application in `production` and `watch` mode and open DevTools
+    log:
+      error: Error encountered while running `{{.NPX_HANDLE}}ndb nodemon`
+      start: Running `{{.NPX_HANDLE}}ndb nodemon`
+      success: Successfully ran `{{.NPX_HANDLE}}ndb nodemon`
+    cmds:
+      - '{{.NPX_HANDLE}}ndb nodemon'
+  test:
+    deps:
+      - :install:modules:local
+      - :install:npm:jest
+    desc: Run the unit tests for an NPM project
+    log:
+      error: Errors were detected by Jest
+      start: Running `{{.NPX_HANDLE}}jest`
+      success: Successfully ran `{{.NPX_HANDLE}}jest`
+    cmds:
+      - '{{.NPX_HANDLE}}jest --silent=false'
+  test:ci:
+    deps:
+      - :install:modules:local
+      - :install:npm:jest
+    log:
+      error: Encountered error while running `{{.NPX_HANDLE}}jest --collectCoverage --ci --reporters=default --reporters=jest-junit`
+      start: Running `{{.NPX_HANDLE}}jest --collectCoverage --ci --reporters=default --reporters=jest-junit`
+      success: Successfully ran `{{.NPX_HANDLE}}jest --collectCoverage --ci --reporters=default --reporters=jest-junit`
+    cmds:
+      - '{{.NPX_HANDLE}}jest --collectCoverage --ci --reporters=default --reporters=jest-junit'
+  test:coverage:
+    deps:
+      - :install:modules:local
+      - :install:npm:jest
+    desc: Generate code coverage assets
+    log:
+      error: Error running `{{.NPX_HANDLE}}jest --coverage`
+      start: Generating code coverage assets by running `{{.NPX_HANDLE}}jest --coverage`
+      success: Successfully ran `{{.NPX_HANDLE}}jest --coverage`
+    cmds:
+      - '{{.NPX_HANDLE}}jest --coverage'
+  test:dashboard:
+    deps:
+      - :install:modules:local
+      - :install:npm:majestic
+    desc: Run and manage test cases from a web interface (powered by `majestic`)
+    log:
+      error: Error running `{{.NPX_HANDLE}}majestic --debug`
+      start: Launching web interface for debugging test cases by running `{{.NPX_HANDLE}}majestic --debug`
+      success: Successfully ran `{{.NPX_HANDLE}}majestic --debug`
+    cmds:
+      - '{{.NPX_HANDLE}}majestic --debug'
+  test:debug:
+    deps:
+      - :install:modules:local
+      - :install:npm:jest
+    desc: Debug tests in `watch` mode
+    log:
+      error: Error running `{{.NPX_HANDLE}}jest --watch`
+      start: Running `{{.NPX_HANDLE}}jest --watch`
+      success: Successfully ran `{{.NPX_HANDLE}}jest --watch`
+    cmds:
+      - '{{.NPX_HANDLE}}jest --watch'
+  test:clinic:
+    deps:
+      - :install:npm:autocannon
+      - :install:npm:clinic
+    desc: Initiate a web server benchmarking session (with `clinic`)
+    hide: '{{ne (print .REPOSITORY_TYPE "-" .REPOSITORY_SUBTYPE) "npm-app"}}'
+    summary: |
+      # Initiate a web server benchmarking session with `clinic`
+
+      This task runs a basic stress test on an endpoint that is `/` by default.
+      See the examples below for stress testing an endpoint other than the default.
+      For more information, see the [`clinic` GitHub page](https://github.com/clinicjs/node-clinic).
+
+      **Example usage:**
+      `task npm:benchmark`
+
+      **Example with custom endpoint:**
+      `task npm:benchmark -- /custom/endpoint`
+    log:
+      error: Error encountered while running clinic with autocannon on `dist/main.js`
+      start: Running clinic with autocannon on `dist/main.js`
+      success: Finished running clinic with autocannon on `dist/main.js`
+    cmds:
+      - '{{.NPX_HANDLE}}clinic doctor --autocannon [ {{if .CLI_ARGS}}{{.CLI_ARGS}}{{else}}/{{end}} --method POST ] -- node ./dist/main.js'
+  test:e2e: 'true'
+  test:inspect:
+    deps:
+      - :install:modules:local
+      - :install:npm:jest
+      - :install:npm:ndb
+      - :install:npm:nodemon
+      - :install:npm:ts-node
+    desc: Debug tests with DevTools in `watch` mode
+    log:
+      error: Error running `{{.NPX_HANDLE}}ndb nodemon --config .config/nodemon-jest.json`
+      start: Running `{{.NPX_HANDLE}}ndb nodemon --config .config/nodemon-jest.json` to enable debugging with Chrome DevTools in watch mode
+      success: Successfully ran `{{.NPX_HANDLE}}ndb nodemon --config .config/nodemon-jest.json`
+    cmds:
+      - '{{.NPX_HANDLE}}ndb nodemon --config .config/nodemon-jest.json'
+  test:none:
+    log:
+      start: No tests have been set up for this project
+    cmds:
+      - task: :donothing
+  typesync:
+    deps:
+      - :install:npm:typesync
+    desc: Install missing type definitions
+    log:
+      error: Error running `{{.NPX_HANDLE}}typesync`
+      start: Installing missing type definitions by running `{{.NPX_HANDLE}}typesync`
+      success: Successfully ran `{{.NPX_HANDLE}}typesync`
+    cmds:
+      - '{{.NPX_HANDLE}}typesync'
+  verify: 'true'
+  count:
+    deps:
+      - :install:software:tokei
+    desc: Display a chart detailing the lines of code for each language used
+    log:
+      error: Encountered error while running `tokei . --exclude .common .modules`
+      start: Analyzing project for code-language statistics
+    cmds:
+      - tokei . --exclude .common .modules
+  find:todo:
+    deps:
+      - :install:npm:leasot
+    desc: Scan code base for TODOs and FIXMEs
+    vars:
+      LEASOT_IGNORE: .common .modules .venv node_modules venv
+    log:
+      error: Encountered error while running `leasot --ignore {{.LEASOT_IGNORE}} {{.CLI_ARGS}}`
+      start: Scanning project for TODOs and FIXMEs
+    cmds:
+      - leasot --ignore {{.LEASOT_IGNORE}} {{.CLI_ARGS}}
+
+  coverage:all:
+    cmds:
+      - task: :npm:build:all
+      - task: :npm:test:unit
+      - task: report
+  coverage:check:
+    deps:
+      - :install:modules:local
+      - :install:npm:nyc
+    log:
+      error: Errors encountered while running `nyc report` and `nyc check-coverage`
+      start: Running `nyc report` and `nyc check-coverage`
+      success: Finished running `nyc`
+    cmds:
+      - '{{.NPX_HANDLE}}nyc report'
+      - '{{.NPX_HANDLE}}nyc check-coverage --lines 100 --functions 100 --branches 100'
+  coverage:html:
+    deps:
+      - :install:modules:local
+      - :install:npm:nyc
+    log:
+      error: Error while generating HTML report with `nyc`
+      start: Reporting with `nyc` in HTML format
+      success: Report generated by `nyc` in HTML format
+    cmds:
+      - '{{.NPX_HANDLE}}nyc report --reporter=html'
+  coverage:lcov:
+    deps:
+      - :install:modules:local
+      - :install:npm:nyc
+    log:
+      error: Encountered error generating `lcov` report with `nyc`
+      start: Reporting with `nyc` in `lcov` format
+      success: Finished `lcov` report with `nyc`
+    cmds:
+      - '{{.NPX_HANDLE}}nyc report --reporter=lcov'
+  coverage:open:
+    deps:
+      - html
+      - :npm:install:open-cli
+    desc: View the code coverage report in the browser
+    hide: '{{ne .REPOSITORY_TYPE "npm"}}'
+    log:
+      start: Opening `coverage/index.html` with the default browser
+    cmds:
+      - '{{.NPX_HANDLE}}open-cli coverage/index.html'
+  coverage:report:
+    deps:
+      - html
+      - lcov
+  coverage:upload:
+    deps:
+      - lcov
+      - :install:npm:codecov
+    desc: Upload code coverage report to `codecov.io`
+    hide: '{{ne .REPOSITORY_TYPE "npm"}}'
+    log:
+      error: Error while running `codecov`
+      start: Running `codecov`
+      success: Successfully ran `codecov`
+    cmds:
+      - '{{.NPX_HANDLE}}codecov'
+
+
+  typedoc:
+    deps:
+      - :npm:install:typedoc
+    summary: Generate TypeDoc HTML documentation
+    desc: |
+      # Generate TypeDoc HTML Documentation
+
+      [TypeDoc](https://typedoc.org/) is a CLI tool that generates documentation from specially crafted
+      comments in TypeScript code. It also uses type information to generate
+      the documentation.
+
+      Running this command will scan the `src/` folder, extract the comments and
+      type information and then generate HTML documentation.
+
+      Be sure to read about how to decorate your comments by reading
+      [TypeDoc's documentation on comment formatting](https://typedoc.org/guides/doccomments/).
+    cmds:
+      - '{{.NPX_HANDLE}}typedoc src/ --exclude "**/*.spec.ts" --out  build/docs'
+      - '{{.NPX_HANDLE}}typedoc src/ --exclude "**/*.spec.ts" --json build/docs/typedoc.json'
+
+  open:
+    deps:
+      - html
+      - :npm:install:open-cli
+    log:
+      start: Opening TypeDoc documentation (`build/docs/index.html`) in the default browser
+    cmds:
+      - '{{.NPX_HANDLE}}open-cli build/docs/index.html'
+

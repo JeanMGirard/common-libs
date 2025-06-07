@@ -1,0 +1,19 @@
+---
+lint:golang:
+  stage: lint
+  image:
+    name: megabytelabs/golangci-lint:slim
+    entrypoint: ['']
+  allow_failure: true
+  rules:
+    - if: $DO_CI == 'false'
+      when: never
+    - if: $CI_COMMIT_BRANCH == 'synchronize'
+      when: never
+    - exists:
+        - '**/*.{go}'
+  needs: []
+  variables:
+    GIT_DEPTH: 1
+  script:
+    - golangci-lint run -c .config/golangci.yml

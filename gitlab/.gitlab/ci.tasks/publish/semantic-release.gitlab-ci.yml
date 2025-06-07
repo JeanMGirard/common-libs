@@ -1,0 +1,17 @@
+---
+semantic-release:
+  stage: publish
+  image: megabytelabs/updater:$SEMANTIC_RELEASE_TAG
+  rules:
+    - if: $DO_CI == 'false'
+      when: never
+    - if: $CI_COMMIT_BRANCH == 'synchronize'
+      when: never
+    - if: >
+        $CI_COMMIT_REF_NAME =~ /(master|main|next|alpha|beta)/ && ($CI_COMMIT_TITLE =~ /^.{2,4}(feat|fix|perf|refactor|revert)\(.*\): .*$/ || $CI_COMMIT_TITLE =~ /.*(PATCH UPDATE|MINOR UPDATE|MAJOR UPDATE).*/)
+  variables:
+    GIT_SUBMODULE_STRATEGY: recursive
+  script:
+    - bash start.sh
+    - pnpm update semantic-release-config
+    - task publish:semantic-release

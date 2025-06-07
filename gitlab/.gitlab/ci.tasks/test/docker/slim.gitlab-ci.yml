@@ -1,0 +1,19 @@
+---
+test:docker:
+  stage: test
+  image: megabytelabs/updater:slim-extended
+  rules:
+    - if: $DO_CI == 'false'
+      when: never
+    - if: $CI_COMMIT_BRANCH == 'synchronize'
+      when: never
+    - exists:
+        - Dockerfile
+  needs: []
+  variables:
+    GIT_DEPTH: 1
+  script:
+    - bash start.sh
+    - source "$HOME/.profile"
+    - task build
+    - task test

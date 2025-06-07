@@ -1,0 +1,84 @@
+
+
+variables:
+  CHARTS_DISABLED: ""
+  CHARTS_CI_JOB: "generate:charts"
+  CHARTS_CI_SRC: .gitlab/ci/charts/.gitlab-ci.yml
+  CHARTS_CI_DIST: .gitlab-ci.charts.yml
+  CHARTS_ROOT: charts
+
+
+.charts:base:
+  image: alpine:latest
+
+.charts:rules:
+  image: alpine:latest
+  rules:
+  - &on-disabled
+    if: '$CHARTS_DISABLED'
+    when: never
+  - &on-changes
+    if: '$CI_COMMIT_BRANCH && $CI_PIPELINE_SOURCE == "merge_request_event"'
+    changes:
+      paths: ['${CHARTS_ROOT}/${CHARTS_NAME:-*}/**/*']
+      # compare_to: 'refs/heads/branch1'
+    allow_failure: false
+    when: always
+  - &on-changes-not-merged
+    <<: *on-changes
+    if: '$CI_COMMIT_BRANCH && $CI_PIPELINE_SOURCE != "merge_request_event"'
+    allow_failure: true
+  - &on-release-tag:
+    if: '$CI_COMMIT_TAG =~ "/^$/"'
+    when: always
+  - &on-secondary-branch
+    if: '$CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH'
+    when: manual
+    allow_failure: true
+
+
+.charts:generate:
+  stage: generate
+  extends:
+    - .charts:base
+    - .charts:rules
+  environment:
+    CHARTS_ROOT: '${CHARTS_ROOT:-charts}'
+  before_script:
+    - 'apk add --no-cache bash git'
+  script:
+    - 'SCRIPT="$(dirname ${GENERATE_SCRIPT})/generate.sh"'
+    - 'chmod +x $SCRIPT && . $SCRIPT > ${CHARTS_CI_DIST}'
+    - 'cat ${CHARTS_CI_DIST}'
+  artifacts:
+    expire_in: 1 hour
+    paths:
+      - '${CHARTS_CI_DIST}'
+
+.charts:
+  stage: release
+  extends:
+    - .charts:base
+    - .charts:rules
+  needs: [ generate:charts ]
+  trigger:
+    strategy: depend
+    include:
+      - artifact: '${CHARTS_CI_DIST}'
+        job: generate:charts
+
+.chart:
+  stage: release
+  extends:
+    - .charts:base
+    - .charts:rules
+  variables:
+    CHARTS_ROOT: '${CHARTS_ROOT:-charts}'
+  environment:
+    CHART_NAME: '${CHART_NAME:-$(basename dirname)}'
+
+
+generate:charts:
+  stage: generate
+  extends:
+    - .charts:generate

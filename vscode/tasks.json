@@ -1,0 +1,75 @@
+{
+  "version": "2.0.0",
+  // Start PowerShell
+  "windows": {
+    "command": "${env:windir}/System32/WindowsPowerShell/v1.0/powershell.exe",
+    //"command": "${env:ProgramFiles}/PowerShell/6.0.0/powershell.exe",
+    "args": [
+      "-NoProfile",
+      "-ExecutionPolicy",
+      "Bypass"
+    ]
+  },
+  "linux": {
+    "command": "/usr/bin/powershell",
+    "args": [
+      "-NoProfile"
+    ]
+  },
+  "osx": {
+    "command": "/usr/local/bin/powershell",
+    "args": [
+      "-NoProfile"
+    ]
+  },
+  "tasks": [
+    {
+      "label": "Test",
+      "suppressTaskName": true,
+      "isTestCommand": true,
+      "command": "pwsh",
+      "type": "process",
+      "problemMatcher": "$pester",
+      "args": [
+        "Write-Host 'Invoking Pester...'; $ProgressPreference = 'SilentlyContinue'; Invoke-Pester -Script test -PesterOption @{IncludeVSCodeMarker=$true};",
+        "Invoke-Command { Write-Host 'Completed Test task in task runner.' }"
+      ]
+    },
+    {
+      "label": "sync:assets",
+      "type": "shell",
+      "command": "./scripts/sync_assets.sh",
+      "problemMatcher": []
+    },
+    {
+      "label": "check:links",
+      "type": "shell",
+      "command": "./scripts/check_links.sh",
+      "problemMatcher": []
+    },
+    {
+      "label": "gen:cheatsheet",
+      "type": "shell",
+      "command": "./scripts/gen-cheatsheet.sh",
+      "problemMatcher": []
+    },
+    {
+      "label": "update:deps",
+      "type": "shell",
+      "command": "./scripts/update-deps.sh",
+      "problemMatcher": []
+    },
+    {
+      "label": "sync",
+      "type": "shell",
+      "command": " git add . && git commit -m 'sync' && git pull && git push",
+      "problemMatcher": []
+    },
+    {
+      "label": "amplify.yml",
+      "type": "shell",
+      "command": "code-insiders ./amplify.yml",
+      "problemMatcher": []
+    }
+  ]
+}

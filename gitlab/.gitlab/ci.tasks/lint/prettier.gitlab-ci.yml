@@ -1,0 +1,19 @@
+---
+lint:eslint:
+  stage: lint
+  image:
+    name: megabytelabs/eslint:slim
+    entrypoint: ['']
+  rules:
+    - if: $DO_CI == 'false'
+      when: never
+    - if: $CI_COMMIT_BRANCH == 'synchronize'
+      when: never
+    - exists:
+        - '**/*.{js,jsx,json,toml,ts,tsx,yaml,yml}'
+  needs: []
+  variables:
+    GIT_DEPTH: 1
+  script:
+    - pnpm i eslint-config-strict-mode prettier-config-sexy-mode
+    - pnpx eslint -c package.json --no-eslintrc --format stylish .

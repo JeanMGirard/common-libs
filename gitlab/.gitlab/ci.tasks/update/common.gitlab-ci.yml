@@ -1,0 +1,16 @@
+---
+update:common:
+  stage: update
+  image:
+    name: megabytelabs/updater:latest
+    entrypoint: ['']
+  rules:
+    - if: $DO_CI == 'false'
+      when: never
+    - if: ($CI_PIPELINE_SOURCE == 'pipeline' || $CI_PIPELINE_SOURCE == 'web') && $CI_COMMIT_REF_NAME == 'synchronize'
+  variables:
+    GIT_SUBMODULE_STRATEGY: recursive
+  script:
+    - bash start.sh
+    - source "$HOME/.profile"
+    - task update

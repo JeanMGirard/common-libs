@@ -1,0 +1,375 @@
+---
+version: '3'
+x-cmds:
+  task: &task scoop install task
+
+tasks:
+  windows:
+    summary: Installs common dependencies for Windows
+    vars: { PACKAGES: "curl git jq" }
+    run: once
+    status:
+      - |
+        powershell -Command '{{range $i, $PACKAGE := split " " .PACKAGES}} Get-Command "{{$PACKAGE}}";{{ end }}'
+    deps:
+      - task: packages
+        vars: { PACKAGES: "{{.PACKAGES}}" }
+
+  linux:
+    summary: Installs common dependencies for Linux
+    vars: { PACKAGES: "curl git jq" }
+    run: once
+    status:
+      - '{{range $i, $PACKAGE := split " " .PACKAGES}} type {{$PACKAGE}} 1> /dev/null; {{ end }}'
+    deps:
+      - task: packages
+        vars: { PACKAGES: "{{.PACKAGES}}" }
+
+  darwin:
+    summary: Installs common dependencies for macOS
+    vars: { PACKAGES: "curl git jq" }
+    run: once
+    status:
+      - '{{range $i, $PACKAGE := split " " .PACKAGES}} type {{$PACKAGE}} 1> /dev/null; {{ end }}'
+    deps:
+      - task: packages
+        vars: { PACKAGES: "{{.PACKAGES}}" }
+
+
+  # ##############################################################################
+
+  packages:
+    vars:
+      PACKAGES: '{{default "" .PACKAGES}}'
+    summary: Installs packages
+    run: once
+    status:
+      - |
+        {{ if empty .PACKAGES}}
+          exit 1;
+        {{ end }}
+        
+        {{ if eq OS "windows"}} powershell -Command '{{range $i, $PACKAGE := split " " .PACKAGES}}Get-Command "{{$PACKAGE}}";{{ end }}'
+        {{ else }} {{range $i, $PACKAGE := split " " .PACKAGES}} type {{$PACKAGE}} 1> /dev/null; {{ end }}
+        {{ end }}
+    cmds:
+      - |
+        {{ if empty .PACKAGES}}
+        echo "No packages to install"
+
+        {{else if eq OS "windows"}}
+          {{range $i, $PACKAGE := split " " .PACKAGES}} 
+          powershell -Command 'try{ if(Get-Command "{{$PACKAGE}}"){} } catch { scoop install {{$PACKAGE}}; }'
+          {{end}}
+        
+        {{else if eq OS "linux"}}
+          if type sudo &> /dev/null; then PREFIX="sudo"; fi
+        
+          if   [ -f "/etc/debian_version" ]; then ${PREFIX:-} apt-get update && apt-get install -y {{.PACKAGES}};
+          elif [ -f "/etc/redhat-release" ]; then ${PREFIX:-} yum install -y {{.PACKAGES}};
+          elif [ -f "/etc/arch-release" ];   then ${PREFIX:-} pacman -Syu --noconfirm {{.PACKAGES}};
+          elif [ -f "/etc/alpine-release" ]; then ${PREFIX:-} apk --no-cache add {{.PACKAGES}};
+          else echo "Unknown Linux family";
+          fi
+
+        {{else if eq OS "darwin"}}
+
+        {{end}}
+  
+  
+  
+
+  # ##############################################################################
+  npm:
+    summary: Installs local packages or a package globally via npm/yarn/pnpm
+    vars:
+      PACKAGE: '{{default "" .PACKAGE}}'
+      BIN: '{{default (default "" .PACKAGE) .BIN}}'
+    run: when_changed
+    status:
+      - if [ -n "{{ default "" .BIN }}" ]; then type {{.BIN}} &> /dev/null; fi
+    sources:
+      - package.json
+    cmds:
+      - |
+        {{if empty .PACKAGE}}
+        echo "Installing local packages ($(pwd))"
+        
+        # if [ -f ".yarnrc.yml" ];    then npm install -g yarn; fi;
+        # if [ -f "pnpm-lock.yaml" ]; then npm install -g pnpm; fi;
+        
+        if   [ -f "package-lock.json" ];  then echo "using npm...";   npm  install;
+        elif [ -f ".yarnrc.yml" ];        then echo "using yarn...";  yarn install;
+        elif [ -f "pnpm-lock.yaml" ];     then echo "using pnpm...";  pnpm install;
+        else  echo "No lock file found"; fi
+        
+        {{else}}
+        echo "Installing {{.PACKAGE}}"
+        npm install -g {{.PACKAGE}} {{if empty .BIN}}{{else}} --prefix "{{.BIN}}" {{end}}
+        
+        {{end}}
+
+  pip:
+    summary: Installs a package via pip
+    vars:
+      PACKAGE: '{{default "" .PACKAGE}}'
+      BIN: '{{default .PACKAGE .BIN}}'
+    run: when_changed
+    status:
+      - type {{.BIN}} &> /dev/null
+    cmds:
+      - |
+        {{if empty .PACKAGES}}
+        echo "Installing local packages ($(pwd))"
+        
+        pip3 install -r "requirements.txt"
+        {{else}}
+        
+        {{end}}
+      - python3 -m pip install --no-cache-dir -U {{.PACKAGE}};
+  go:
+    summary: Installs a package via go
+    vars:
+      PACKAGE: '{{default "" .PACKAGE}}'
+      BIN: '{{default .PACKAGE .BIN}}'
+    run: when_changed
+    status:
+      - type {{.BIN}} &> /dev/null
+    cmds:
+      - go install {{.PACKAGE}}
+  package:
+    vars:
+      PACKAGE: '{{default "" .PACKAGE}}'
+      BIN: '{{default .PACKAGE .BIN}}'
+    run: when_changed
+    sources:
+      - Brewfile
+    status:
+      - type {{.BIN}} &> /dev/null
+    cmds:
+      - |
+        if ! type brew &> /dev/null; then
+          /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+        
+          echo '# Set PATH, MANPATH, etc., for Homebrew.' >> $HOME/.profile
+          echo 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"' >> $HOME/.profile
+          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+        fi
+      - |
+        {{if empty .PACKAGE}}
+        brew
+        {{else}}
+        brew install {{.PACKAGE}}
+        {{end}}
+
+  # ##############################################################################
+  requirements:
+    deps:
+      - { task: brew,       vars: { BIN: git, PACKAGE: git } }
+      - { task: brew,       vars: { BIN: jq, PACKAGE: jq } }
+      - { task: brew,       vars: { BIN: yq, PACKAGE: yq } }
+      - { task: brew,       vars: { BIN: go, PACKAGE: go } }
+
+  devel:
+    deps:
+      - { task: requirements }
+      - { task: brew,       vars: { BIN: docker, PACKAGE: docker } }
+      - { task: brew,       vars: { BIN: docker-slim, PACKAGE: docker-slim } }
+      - { task: brew,       vars: { BIN: hadolint, PACKAGE: hadolint } }
+      - { task: brew,       vars: { BIN: sops, PACKAGE: sops } }
+      - { task: brew,       vars: { BIN: python3, PACKAGE: python3 } }
+      - { task: brew,       vars: { BIN: gzip, PACKAGE: gzip } }
+      - { task: brew,       vars: { BIN: gitlab-runner, PACKAGE: gitlab-runner } }
+      - { task: brew,       vars: { BIN: gh, PACKAGE: gh } }
+      - { task: brew,       vars: { BIN: kubectl, PACKAGE: kubernetes-cli } }
+      - { task: brew,       vars: { BIN: helm, PACKAGE: helm } }
+      - { task: brew,       vars: { BIN: node, PACKAGE: node } }
+      - { task: brew,       vars: { BIN: proselint, PACKAGE: proselint } }
+      - { task: brew,       vars: { BIN: yamllint, PACKAGE: yamllint } }
+      - { task: brew,       vars: { BIN: gitlab-ci-local , PACKAGE: gitlab-ci-local } }
+      - { task: brew,       vars: { BIN: kustomize, PACKAGE: kustomize } }
+      - { task: brew,       vars: { BIN: helmfile, PACKAGE: helmfile } }
+      - { task: brew,       vars: { BIN: kubectl-krew, PACKAGE: kubectl-krew } }
+      - { task: brew,       vars: { BIN: golangci-lint, PACKAGE: golangci-lint } }
+      - { task: brew,       vars: { BIN: poetry, PACKAGE: poetry } }
+      - { task: brew,       vars: { BIN: codeclimate, PACKAGE: codeclimate/formulae/codeclimate } }
+      - { task: brew,       vars: { BIN: tokei, PACKAGE: tokei } }
+      - { task: brew,       vars: { BIN: gitleaks, PACKAGE: gitleaks } }
+
+
+
+
+
+  all:
+    deps:
+      - { task: requirements }
+      - { task: devel }
+      # brew
+      # Failed blocklint gcloud pyformat pre-commit-hooks
+      - { task: brew,   vars: { BIN: dockle, PACKAGE: goodwithtech/r/dockle } }
+      - { task: brew,        vars: { BIN: glab, PACKAGE: glab } }
+      - { task: brew,        vars: { BIN: git-bug, PACKAGE: git-bug } }
+      - { task: brew,        vars: { BIN: ansible-lint, PACKAGE: ansible-lint } }
+      - { task: brew,        vars: { BIN: flake8, PACKAGE: flake8 } }
+      - { task: brew,        vars: { BIN: molecule, PACKAGE: molecule } }
+      - { task: brew,        vars: { BIN: mypy, PACKAGE: mypy } }
+      - { task: brew,        vars: { BIN: gcc, PACKAGE: gcc } }
+      - { task: brew,      vars: { BIN: ots,            PACKAGE: ots } }
+      - { task: brew,      vars: { BIN: goofys,         PACKAGE: goofys } }
+      - { task: brew,      vars: { BIN: goreleaser,     PACKAGE: goreleaser } }
+      - { task: brew,        vars: { BIN: pup,            PACKAGE: pup } }
+      - { task: brew,        vars: { BIN: mc,             PACKAGE: minio } }
+      - { task: brew,        vars: { BIN: act, PACKAGE: act } }
+      - { task: brew,        vars: { BIN: coreutils, PACKAGE: coreutils } }
+      - { task: brew,        vars: { BIN: virtualbox, PACKAGE: virtualbox } }
+      - { task: brew,        vars: { BIN: vmware, PACKAGE: vmware } }
+      - { task: brew,        vars: { BIN: findutils, PACKAGE: findutils } }
+      - { task: brew,        vars: { BIN: deno, PACKAGE: deno } }
+      - { task: brew,        vars: { BIN: allure, PACKAGE: allure } }
+      - { task: brew,        vars: { BIN: ansifilter, PACKAGE: ansifilter } }
+      - { task: brew,        vars: { BIN: axel, PACKAGE: axel } }
+      - { task: brew,        vars: { BIN: gawk, PACKAGE: gawk } }
+      - { task: brew,        vars: { BIN: gnu-sed, PACKAGE: gnu-sed } }
+      - { task: brew,        vars: { BIN: gnu-tar, PACKAGE: gnu-tar } }
+      - { task: brew,        vars: { BIN: grep, PACKAGE: grep } }
+      - { task: brew,        vars: { BIN: exiftool, PACKAGE: exiftool } }
+      - { task: brew,        vars: { BIN: expect, PACKAGE: expect } }
+      - { task: brew,        vars: { BIN: kind, PACKAGE: kind } }
+      - { task: brew,        vars: { BIN: minikube, PACKAGE: minikube } }
+      - { task: brew,        vars: { BIN: p7zip, PACKAGE: p7zip } }
+      - { task: brew,        vars: { BIN: pinentry, PACKAGE: pinentry } }
+      - { task: brew,        vars: { BIN: pipx, PACKAGE: pipx } }
+      - { task: brew,        vars: { BIN: rsync, PACKAGE: rsync } }
+      - { task: brew,        vars: { BIN: rust, PACKAGE: rust } }
+      - { task: brew,        vars: { BIN: snapcraft, PACKAGE: snapcraft } }
+      - { task: brew,        vars: { BIN: sshfs, PACKAGE: sshfs } }
+      - { task: brew,        vars: { BIN: yarn, PACKAGE: yarn } }
+      - { task: brew ,        vars: { BIN: k9s, PACKAGE: k9s } }
+      - { task: brew ,        vars: { BIN: cookiecutter , PACKAGE: cookiecutter } }
+
+
+      # npm
+      - { task: npm,        vars: { BIN: commitizen, PACKAGE: commitizen } }
+      - { task: npm,        vars: { BIN: commitlint, PACKAGE: @commitlint/cli } }
+      - { task: npm,        vars: { BIN: clinic, PACKAGE: clinic } }
+      - { task: npm,        vars: { BIN: codecov, PACKAGE: codecov } }
+      - { task: npm,        vars: { BIN: cspell, PACKAGE: cspell } }
+      - { task: npm,        vars: { BIN: autocannon, PACKAGE: autocannon } }
+      - { task: npm,        vars: { BIN: bitwarden, PACKAGE: @bitwarden/cli } }
+      - { task: npm,        vars: { BIN: depcheck, PACKAGE: depcheck } }
+      - { task: npm,        vars: { BIN: dev-container, PACKAGE: @vscode/dev-container-cli } }
+      - { task: npm,        vars: { BIN: dockerfilelint, PACKAGE: dockerfilelint } }
+      - { task: npm,        vars: { BIN: esbuild, PACKAGE: esbuild } }
+      - { task: npm,        vars: { BIN: eslint, PACKAGE: eslint } }
+      - { task: npm,        vars: { BIN: esprint, PACKAGE: esprint } }
+      - { task: npm,        vars: { BIN: fuite, PACKAGE: fuite } }
+      - { task: npm,        vars: { BIN: git-notify, PACKAGE: git-notify } }
+      - { task: npm,        vars: { BIN: htmlhint, PACKAGE: htmlhint } }
+      - { task: npm,        vars: { BIN: husky, PACKAGE: husky } }
+      - { task: npm,        vars: { BIN: ifttt, PACKAGE: ifttt-cli } }
+      - { task: npm,        vars: { BIN: ionic, PACKAGE: @ionic/cli } }
+      - { task: npm,        vars: { BIN: jest, PACKAGE: jest } }
+      - { task: npm,        vars: { BIN: leasot, PACKAGE: leasot } }
+      - { task: npm,        vars: { BIN: lint-staged, PACKAGE: lint-staged } }
+      - { task: npm,        vars: { BIN: hbs, PACKAGE: hbs-cli } }
+      - { task: npm,        vars: { BIN: liquidjs, PACKAGE: liquidjs } }
+      - { task: npm,        vars: { BIN: majestic, PACKAGE: majestic } }
+      - { task: npm,        vars: { BIN: markdown-link-check, PACKAGE: markdown-link-check } }
+      - { task: npm,        vars: { BIN: markdown-table-formatter, PACKAGE: markdown-table-formatter } }
+      - { task: npm,        vars: { BIN: modclean, PACKAGE: modclean@2 } }
+      - { task: npm,        vars: { BIN: ndb, PACKAGE: ndb } }
+      - { task: npm,        vars: { BIN: nest, PACKAGE: @nestjs/cli } }
+      - { task: npm,        vars: { BIN: nodemon, PACKAGE: nodemon } }
+      - { task: npm,        vars: { BIN: npm, PACKAGE: npm } }
+      - { task: npm,        vars: { BIN: ntl, PACKAGE: ntl } }
+      - { task: npm,        vars: { BIN: nx, PACKAGE: nx } }
+      - { task: npm,        vars: { BIN: only-allow, PACKAGE: only-allow } }
+      - { task: npm,        vars: { BIN: open, PACKAGE: open-cli } }
+      - { task: npm,        vars: { BIN: pac, PACKAGE: pac } }
+      - { task: npm,        vars: { BIN: pkg, PACKAGE: pkg } }
+      - { task: npm,        vars: { BIN: pnpm, PACKAGE: pnpm } }
+      - { task: npm,        vars: { BIN: pnpm-lock-export, PACKAGE: pnpm-lock-export } }
+      - { task: npm,        vars: { BIN: prettier, PACKAGE: prettier } }
+      - { task: npm,        vars: { BIN: quicktype, PACKAGE: quicktype } }
+      - { task: npm,        vars: { BIN: readme, PACKAGE: @appnest/readme } }
+      - { task: npm,        vars: { BIN: remark, PACKAGE: remark-cli } }
+      - { task: npm,        vars: { BIN: secretlint, PACKAGE: secretlint } }
+      - { task: npm,        vars: { BIN: semantic-release, PACKAGE: semantic-release } }
+      - { task: npm,        vars: { BIN: sharp, PACKAGE: sharp-cli } }
+      - { task: npm,        vars: { BIN: shellcheck, PACKAGE: shellcheck } }
+      - { task: npm,        vars: { BIN: snyk, PACKAGE: snyk } }
+      - { task: npm,        vars: { BIN: standard, PACKAGE: standard } }
+      - { task: npm,        vars: { BIN: standard-version, PACKAGE: standard-version } }
+      - { task: npm,        vars: { BIN: stylelint, PACKAGE: stylelint } }
+      - { task: npm,        vars: { BIN: synp, PACKAGE: synp } }
+      - { task: npm,        vars: { BIN: tinypng, PACKAGE: tinypng-cli } }
+      - { task: npm,        vars: { BIN: ts-node, PACKAGE: ts-node } }
+      - { task: npm,        vars: { BIN: typedoc, PACKAGE: typedoc } }
+      - { task: npm,        vars: { BIN: tsc, PACKAGE: typescript } }
+      - { task: npm,        vars: { BIN: typesync, PACKAGE: typesync } }
+      - { task: npm,        vars: { BIN: yarnhook, PACKAGE: yarnhook } }
+      - { task: npm,        vars: { BIN: discharge, PACKAGE: @static/discharge } }
+      - { task: npm,        vars: { BIN: np, PACKAGE: np } }
+      - { task: npm ,        vars: { BIN: pm2, PACKAGE: pm2 } }
+      - { task: npm ,        vars: { BIN: yo, PACKAGE: yo } }
+
+
+      # go
+      - { task: go,        vars: { BIN: bin,            PACKAGE: github.com/marcosnils/bin@latest } }
+      - { task: go,        vars: { BIN: gitomatic,      PACKAGE: github.com/muesli/gitomatic@latest } }
+      - { task: go,        vars: { BIN: goconvey,       PACKAGE: github.com/smartystreets/goconvey@latest } }
+      - { task: go,        vars: { BIN: gotestsum,      PACKAGE: gotest.tools/gotestsum@latest } }
+      - { task: go,        vars: { BIN: node-prune,     PACKAGE: github.com/tj/node-prune@latest } }
+      - { task: go ,        vars: { BIN: boilr, PACKAGE: github.com/BidPal/boilr@latest } }
+      # - { task:  go,        vars: { BIN: ots,          PACKAGE: github.com/sniptt-official/ots@latest } }
+      # - { task:  go,        vars: { BIN: goofys,         PACKAGE: github.com/kahing/goofys@latest } }
+      # - { task:  go,        vars: { BIN: goreleaser,     PACKAGE: github.com/goreleaser/goreleaser@latest } }
+      # - { task:  go,        vars: { BIN: pup,            PACKAGE: github.com/ericchiang/pup@latest } }
+      # - { task:  go,        vars: { BIN: mc,             PACKAGE: github.com/minio/mc@latest } }
+      # - { task:  go,        vars: { BIN: golangci-lint,  PACKAGE: github.com/golangci/golangci-lint/cmd/golangci-lint@latest } }
+
+      # pip
+      - { task: pip,        vars: { BIN: add-trailing-comma, PACKAGE: add-trailing-comma } }
+      - { task: pip,        vars: { BIN: ansible-base, PACKAGE: ansible-base } }
+      - { task: pip,        vars: { BIN: ansibler, PACKAGE: ansibler } }
+      - { task: pip,        vars: { BIN: black, PACKAGE: black } }
+      - { task: pip,        vars: { BIN: blocklint, PACKAGE: blocklint } }
+      - { task: pip,        vars: { BIN: getmac, PACKAGE: getmac } }
+      - { task: pip,        vars: { BIN: isort, PACKAGE: isort } }
+      - { task: pip,        vars: { BIN: latestos, PACKAGE: latestos } }
+      - { task: pip,        vars: { BIN: mod-ansible-autodoc, PACKAGE: mod-ansible-autodoc } }
+      - { task: pip,        vars: { BIN: homebrew-pypi-poet, PACKAGE: homebrew-pypi-poet } }
+      - { task: pip,        vars: { BIN: pre-commit-hooks, PACKAGE: pre-commit-hooks } }
+      - { task: pip,        vars: { BIN: pyformat, PACKAGE: pyformat } }
+      - { task: pip,        vars: { BIN: pyinstaller, PACKAGE: pyinstaller } }
+      - { task: pip,        vars: { BIN: pyinstrument, PACKAGE: pyinstrument } }
+      - { task: pip,        vars: { BIN: pysnooper, PACKAGE: pysnooper } }
+      - { task: pip,        vars: { BIN: pytest, PACKAGE: pytest } }
+      - { task: pip,        vars: { BIN: pytest-cov, PACKAGE: pytest-cov } }
+      - { task: pip,        vars: { BIN: toml-sort, PACKAGE: toml-sort } }
+      # ========================================================================
+      - { task: package,        vars: { BIN: gcloud, PACKAGE: gcloud } }
+      - { task: package,        vars: { BIN: git-issue, PACKAGE: git-issue } }
+      - { task: package,        vars: { BIN: packer, PACKAGE: packer } }
+      - { task: package,        vars: { BIN: vagrant, PACKAGE: vagrant } }
+      - { task: package,        vars: { BIN: structure-test, PACKAGE: container-structure-test } }
+      - { task: package,        vars: { BIN: dasel, PACKAGE: dasel } }
+      - { task: package,        vars: { BIN: fury, PACKAGE: fury } }
+      - { task: package,        vars: { BIN: grype, PACKAGE: grype } }
+      - { task: package,        vars: { BIN: kvm, PACKAGE: kvm } }
+      - { task: package,        vars: { BIN: parallels, PACKAGE: parallels } }
+      - { task: package,        vars: { BIN: sentry, PACKAGE: sentry } }
+      - { task: package,        vars: { BIN: sshpass, PACKAGE: sshpass } }
+      - { task: package,        vars: { BIN: subrepo, PACKAGE: subrepo } }
+      - { task: package,        vars: { BIN: trivy, PACKAGE: trivy } }
+      - { task: package,        vars: { BIN: unbuffer, PACKAGE: unbuffer } }
+      - { task: package,        vars: { BIN: helm-docs, PACKAGE: helm-docs } }
+      - { task: package,        vars: { BIN: helm-diff, PACKAGE: helm-diff } }
+      - { task: package,        vars: { BIN: helm-secrets, PACKAGE: helm-secrets } }
+      - { task: package,        vars: { BIN: vals, PACKAGE: vals } }
+      - { task: package,        vars: { BIN: lstags, PACKAGE: lstags } }
+      - { task: package,        vars: { BIN: dockly, PACKAGE: dockly } }
+      - { task: package ,        vars: { BIN: vals, PACKAGE: vals } }
+      - { task: package ,        vars: { BIN: helm-docs, PACKAGE: helm-docs } }
+      - { task: package ,        vars: { BIN: helm-diff, PACKAGE: helm-diff } }
+      - { task: package ,        vars: { BIN: helm-secrets, PACKAGE: helm-secrets } }

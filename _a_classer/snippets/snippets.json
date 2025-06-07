@@ -1,0 +1,17 @@
+{
+    "gitlab-tools": {
+        "ref": "gitlab:2391298"
+    },
+    "dotfiles": {
+        "ref":  "gitlab:2391252"
+    },
+    "setup-tools": {
+        "ref":  "gitlab:2391248"
+    },
+    "github-tools": {
+        "ref":  "gitlab:2392350"
+    },
+    "repo-tools": {
+        "ref":  "gitlab:2392352"
+    }
+}

@@ -1,0 +1,6 @@
+
+
+
+.rules:
+  local-only:
+    - { if: $GITLAB_CI == 'false' }

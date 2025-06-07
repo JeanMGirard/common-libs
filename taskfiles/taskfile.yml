@@ -1,0 +1,56 @@
+---
+version: '3'
+
+includes:
+  install:
+    internal: true
+    taskfile: ./install.yml
+    dir: ../../
+    aliases: [install]
+
+#
+#env: {}
+#vars: {}
+
+
+tasks:
+
+
+  # ##############################################################################
+  # Install
+  # ##############################################################################
+  install:
+    summary: Installs all the dependencies needed to run the project.
+    deps:
+      - task: install:{{OS}}
+      - task: install:npm
+
+  # ##############################################################################
+  #
+  # ##############################################################################
+
+  setup:
+    summary: .
+    cmds: [ ]
+
+  update:
+    summary: .
+    cmds: []
+
+  start:
+    summary: .
+    cmds: [ ]
+
+  build:
+    summary: .
+    cmds: [ ]
+
+  publish:
+    summary: .
+    cmds: [ ]
+
+  lint:
+    summary: .
+    cmds: [ ]
+
+

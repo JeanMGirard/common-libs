@@ -1,0 +1,79 @@
+version: '3.7'
+
+
+x-defaults:
+
+  restart-policy: &restart_policy_default unless-stopped
+  healthcheck: &default_healthcheck
+    interval: 30s
+    timeout: 3s
+    retries: 5
+    start_period: 10s
+#  logging: &default-logging
+#    options:
+#      max-size: "12m"
+#      max-file: "5"
+#    driver: json-file
+  service: &default_service
+    restart: *restart_policy_default
+    env_file:
+      - ./.env
+    healthcheck:
+      <<: *default_healthcheck
+
+
+services:
+
+  api-node:
+    extends:
+      file: ./services/api.nodejs/docker-compose.yml
+      service: api-node
+    env_file:
+      - .env
+      - ./services/api.nodejs/.env
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:${POSTGRES_PORT}/${POSTGRES_DB}
+    depends_on:
+      postgres: { condition: service_healthy }
+
+
+  postgres:
+    extends:
+      file: ./services/api.nodejs/docker-compose.yml
+      service: postgres
+    env_file:
+      - .env
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  api-go:
+    <<: *default_service
+    image: api-go:latest
+    container_name: api-go
+    profiles:
+      - go
+    build:
+        context: ./services/api.go
+        dockerfile: Dockerfile
+    ports:
+      - 8080:8080
+    links:
+      - postgres:postgres
+    env_file:
+      - ./.env
+    networks:
+      - api
+      - postgres
+    depends_on:
+      - postgres
+
+
+networks:
+  api:
+  postgres:
+
+#secrets:
+#  server-certificate:
+#    file: ./server.cert
+volumes:
+  postgres-data:

@@ -1,0 +1,12 @@
+
+
+
+
+.lint:docker:
+  image: docker
+  cmd: docker run --rm -i hadolint/hadolint < Dockerfile
+
+
+# This file is a template, and might need editing before it works on your project.
+include:
+  template: Jobs/Code-Quality.gitlab-ci.yml

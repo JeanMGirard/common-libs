@@ -1,0 +1,46 @@
+
+[user]
+	username = JeanMGirard
+	name = Jean-Michel Girard
+	email = jean.m.girard@outlook.com
+	editor = nano
+# 	 signingkey = XXXXXXXXX
+[core]
+	editor = emacs
+
+#[commit]
+#    gpgsign = true
+[pull]
+    rebase = true
+[fetch]
+    prune = false
+[rebase]
+    autoStash = false
+
+[merge]
+    tool = kdiff3
+    guitool = kdiff3
+[mergetool "sourcetree"]
+    cmd = "sourcetree"
+    trustExitCode = true
+[mergetool "kdiff3"]
+    cmd = "kdiff3 \"$BASE\" \"$LOCAL\" \"$REMOTE\" -o \"$MERGED\""
+
+
+# codecommit credential-helper
+[credential "ssh://git-codecommit.ca-central-1.amazonaws.com"]
+    helper = !aws codecommit credential-helper $@
+    UseHttpPath = true
+
+
+# Force ssh
+[url "git@gitlab.com:"]
+    insteadOf = https://gitlab.com/
+[url "git@github.com:"]
+    insteadOf = https://github.com/
+[url "ssh://git-codecommit.ca-central-1.amazonaws.com/"]
+    insteadOf = https://git-codecommit.ca-central-1.amazonaws.com/
+[url "ssh://git-codecommit.us-east-1.amazonaws.com/"]
+    insteadOf = https://git-codecommit.us-east-1.amazonaws.com/
+
+

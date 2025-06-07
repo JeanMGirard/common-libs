@@ -1,0 +1,150 @@
+{
+  "[dockerfile]": {
+    "editor.defaultFormatter": "ms-azuretools.vscode-docker"
+  },
+  "[html]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "[ignore]": {
+    "editor.defaultFormatter": "foxundermoon.shell-format"
+  },
+  "[javascript]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "[javascriptreact]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "[json5]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "[json]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "[jsonc]": {
+    "editor.defaultFormatter": "vscode.json-language-features"
+  },
+  "[markdown]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "[toml]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "[typescript]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "[typescriptreact]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "[vue]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "[yaml]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "editor.codeActionsOnSave": {
+    "source.fixAll.markdownlint": true
+  },
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  "editor.definitionLinkOpensInPeek": true,
+  "editor.foldingImportsByDefault": true,
+  "editor.formatOnPaste": false,
+  "editor.formatOnSave": true,
+  "editor.snippetSuggestions": "inline",
+  "editor.suggest.showSnippets": true,
+  "editor.suggest.snippetsPreventQuickSuggestions": false,
+  "editor.tabCompletion": "on",
+  "errorLens.delay": 5500,
+  "eslint.alwaysShowStatus": true,
+  "eslint.format.enable": true,
+  "eslint.lintTask.enable": true,
+  "eslint.lintTask.options": "-c package.json --no-eslintrc --cache --cache-location .cache/eslintcache .",
+  "eslint.packageManager": "pnpm",
+  "eslint.validate": [
+    "html",
+    "javascript",
+    "json",
+    "jsonc",
+    "json5",
+    "markdown",
+    "typescript",
+    "yaml"
+  ],
+  "explorer.fileNesting.patterns": {
+    "*.md": "${basename}.*.md"
+  },
+  "files.autoSave": "onFocusChange",
+  "files.exclude": {
+    "**/.DS_Store": true,
+    "**/.git": true,
+    "**/.hg": true,
+    "**/.idea": true,
+    "**/.svn": true,
+    "**/.yarn": true,
+    "**/CVS": true,
+    "**/Thumbs.db": true,
+    "**/node_modules/": true
+  },
+  "files.watcherExclude": {
+    "**/*.js": true,
+    "**/.git/objects/**": true,
+    "**/.git/subtree-cache/**": true,
+    "**/.hg/store/**": true,
+    "**/node_modules/**": true
+  },
+  "git.autoStash": true,
+  "git.autofetch": true,
+  "github.codespaces.showPerformanceExplorer": true,
+  "gitlab.showPipelineUpdateNotifications": true,
+  "gitlens.showWelcomeOnInstall": false,
+  "gitlens.showWhatsNewAfterUpgrades": false,
+  "go.lintFlags": [
+    "--fast"
+  ],
+  "go.lintTool": "golangci-lint",
+  "html.format.endWithNewline": true,
+  "html.format.indentHandlebars": true,
+  "html.format.indentInnerHtml": true,
+  "html.format.templating": true,
+  "javascript.format.semicolons": "remove",
+  "javascript.suggest.completeFunctionCalls": true,
+  "ltex.additionalRules.enablePickyRules": true,
+  "ltex.completionEnabled": true,
+  "markdown-preview-enhanced.enableWikiLinkSyntax": true,
+  "markdown-preview-enhanced.previewTheme": "solarized-light.css",
+  "markdown-preview-enhanced.wikiLinkFileExtension": ".md",
+  "material-icon-theme.showWelcomeMessage": false,
+  "merge-conflict.autoNavigateNextConflict.enabled": true,
+  "npm.enableRunFromFolder": true,
+  "npm.packageManager": "pnpm",
+  "pasteImage.path": "${currentFileDir}/assets/images",
+  "pasteImage.prefix": "/",
+  "prettier.printWidth": 120,
+  "prettier.singleQuote": true,
+  "search.exclude": {
+    "**/.pnp.*": true,
+    "**/.yarn": true,
+    ".yarn/": true,
+    "node_modules/": true
+  },
+  "security.workspace.trust.enabled": false,
+  "telemetry.telemetryLevel": "crash",
+  "typescript.enablePromptUseWorkspaceTsdk": true,
+  "typescript.format.semicolons": "remove",
+  "typescript.implementationsCodeLens.enabled": true,
+  "typescript.inlayHints.enumMemberValues.enabled": true,
+  "typescript.inlayHints.functionLikeReturnTypes.enabled": true,
+  "typescript.inlayHints.parameterTypes.enabled": true,
+  "typescript.inlayHints.variableTypes.enabled": true,
+  "typescript.preferences.quoteStyle": "single",
+  "typescript.referencesCodeLens.enabled": true,
+  "typescript.referencesCodeLens.showOnAllFunctions": true,
+  "typescript.suggest.completeFunctionCalls": true,
+  "typescript.tsdk": ".yarn/sdks/typescript/lib",
+  "workbench.startupEditor": "readme",
+  "workbench.welcomePage.walkthroughs.openOnInstall": false,
+  "yaml.format.printWidth": 160,
+  "yaml.format.singleQuote": true,
+  "[shellscript]": {
+    "editor.defaultFormatter": "shakram02.bash-beautify"
+  }
+}

@@ -1,0 +1,15 @@
+[submodule "gitlab-tools"]
+	path = gitlab-tools
+	url = git@gitlab.com:snippets/2391298.git
+[submodule "dotfiles"]
+	path = dotfiles
+	url = git@gitlab.com:snippets/2391252.git
+[submodule "setup-tools"]
+	path = setup-tools
+	url = git@gitlab.com:snippets/2391248.git
+[submodule "github-tools"]
+	path = github-tools
+	url = git@gitlab.com:snippets/2392350.git
+[submodule "repo-tools"]
+	path = repo-tools
+	url = git@gitlab.com:snippets/2392352.git

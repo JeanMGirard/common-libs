@@ -1,0 +1,98 @@
+#! /usr/bin/env bash
+
+
+# === System ================================================================
+
+# ls
+alias ll='ls -alF'
+alias la='ls -A'
+alias l='ls -CF'
+
+# enable color support of ls and also add handy aliases
+if [ -x /usr/bin/dircolors ]; then
+    test -r ~/.dircolors && eval "$(dircolors -b ~/.dircolors)" || eval "$(dircolors -b)"
+    alias ls='ls --color=auto'
+    #alias dir='dir --color=auto'
+    #alias vdir='vdir --color=auto'
+
+    alias grep='grep --color=auto'
+    alias fgrep='fgrep --color=auto'
+    alias egrep='egrep --color=auto'
+fi
+
+# width & height of terminal
+alias dim='echo "$(tput cols)x$(tput lines)"'
+
+alias os_release="echo \$(cat /etc/*release | grep ^NAME | sed 's/NAME=\"//' | sed 's/\"//')"
+alias os_name="echo \$(awk -F \"=\" '/^NAME/ {print $2}' /etc/*-release | sed 's/NAME=\"//' | tr -d '\"')"
+
+# === AWS ===================================================================
+function awsv-login(){ aws-vault exec "$1" -- env | grep AWS; aws-vault login "$1"; }
+alias awsv='aws-vault'
+alias awsv-exec='aws-vault exec ${AWS_PROFILE:-default} -- aws'
+alias aws-login='awsv-login'
+alias aws-profiles='aws-vault list'
+alias aws-exec='aws-tools exec'
+alias aws-scp='aws-tools scp'
+alias aws-ssh='aws-tools ssh'
+alias aws-tunnel='aws-tools tunnel'
+
+
+# == WSL (windows) ============================================================
+if [[ ! -z "$WSL_DISTRO_NAME" ]]; then
+    alias wsl_ip='echo $(ifconfig eth0 | grep "inet ") | grep -o -P "(?<=inet).*(?=netmask)" | sed "s/ //g"'
+    function wsl-cd(){ 
+        cd "$(echo "$1" | sed )"
+    }
+fi
+# == Development =============================================================
+alias sn='snipkit'
+alias snip='snipkit'
+
+# Terraform
+alias tg='terragrunt'
+alias tf='terraform'
+alias tfdocs='terraform-docs'
+
+# Git
+alias ga='git add'
+alias gc='git commit'
+alias gf='git flow'
+alias gs='git status'
+alias git-origin='git remote get-url origin'
+alias git-provider="git remote get-url origin | sed -E 's/^(git@|https:\/\/)//' | sed -E 's/:.*.git$//' | sed -E 's/\/{1}.+$//'"
+alias git-branch='git branch | cut -d ' ' -f2'
+alias git-project="git remote get-url origin | sed -E 's/^(git@|https:\/\/)(\w|\.)+(.){1}//' | sed -E 's/\.git$//'"
+
+function gacp(){ git add . ; git commit -m "$1"; git push; }
+
+
+# Docker & K8s
+alias dk='docker'
+alias dkc='docker compose'
+alias kc='kubectl'
+alias kctl='kubectl'
+alias kctl-a='kubectl apply'
+alias kctl-af='kubectl apply -f'
+alias kctl-c='kubectl create'
+alias kctl-cf='kubectl create'
+alias kctl-d='kubectl delete'
+alias kctl-df='kubectl delete'
+alias kctl-g='kubectl get'
+alias kctl-ga='kubectl get all'
+alias kctl-g-ns='kubectl get --all-namespaces'
+alias kctl-ga-ns='kubectl get all --all-namespaces'
+alias helm-add='helm upgrade --install'
+alias helm-rem='helm uninstall'
+alias mkube='minikube'
+
+function dk-del     { docker stop $@; docker rm $@; }
+function dk-del-all { for cnt in $(docker ps -a | cut -d ' ' -f1); do dk-del "$cnt"; done; }
+function kctl-da    { kubectl delete $@; kubectl apply $@; }
+function kctl-dfa   { kubectl delete -f $@; kubectl apply -f $@; }
+
+# ==== Others== ===============================================================
+alias welcome='if [[ -f ~/.welcome ]]; then . ~/.welcome; fi'
+# =============================================================================
+
+

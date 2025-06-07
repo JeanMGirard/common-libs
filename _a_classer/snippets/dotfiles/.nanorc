@@ -1,0 +1,91 @@
+# == ERRORS ================================================
+# set indicator           # Display a "scrollbar"
+# set magic               # When no syntaxe specified, try using libmagic to determine it
+# ==========================================================
+
+set historylog          # Save the last hundred search strings 
+set linenumbers         # Display line numbers to the left.
+set mouse               # Enable mouse support
+set nonewlines          # Don’t automatically add a newline.
+set smarthome           # Make the Home key smarter.
+set tabsize 4           # Use a tab size of number columns. 
+set trimblanks          # Remove trailing whitespace when automatic hard-wrapping or text is justified.
+set autoindent          # Automatically indent a new line to the same as the previous line
+
+# set showcursor                # Put the cursor on the highlighted item in the file browser
+# set constantshow              # Constantly display the cursor position in the status bar. (vs quickblank).
+# set multibuffer               # When reading in a file with ^R, insert it into a new buffer by default.
+# set afterends                 # Make Ctrl+Right and Ctrl+Delete stop at word ends instead of beginnings.
+# set allow_insecure_backup     #
+# set atblanks                  # Wrap lines at tabs and spaces instead of the screen's edge.
+# set backup                    # When saving, create a backup by adding a (~) to the file’s name.
+# set bookstyle                 # When justifying, treat lines that starts with whitespace as a new paragraph
+# set brackets "characters"     #
+# set breaklonglines            # Automatically hard-wrap the current line when it becomes overlong.
+# set casesensitive             # Do case-sensitive searches by default.
+# set cutfromcursor             # cut from cursor, instead of cutting the whole line.
+# set emptyline                 # leaving a blank line below the title bar.
+# set errorcolor                [bold,][italic,]fgcolor,bgcolor
+# set fill number
+# set functioncolor             [bold,][italic,]fgcolor,bgcolor
+# set guidestripe number        # Draw a vertical line at the given column
+# set jumpyscrolling            # Scroll the buffer contents per half-screen instead of per line.
+# set keycolor                  [bold,][italic,]fgcolor,bgcolor 
+# set locking                   # Enable vim-style lock-files for when editing files.
+# set noconvert         # Don’t convert files from DOS/Mac format.
+# set nohelp            # Don’t display the two help lines at the bottom of the screen.
+# set numbercolor       [bold,][italic,]fgcolor,bgcolor
+# set promptcolor       [bold,][italic,]fgcolor,bgcolor
+# set scrollercolor     fgcolor,bgcolor
+# set quickblank        # Make status-bar messages disappear after 1 keystroke 
+# set regexp            # Do regular-expression searches by default.
+# set saveonexit        # Save a changed buffer automatically on exit (^X); don’t prompt.
+# set selectedcolor     [bold,][italic,]fgcolor,bgcolor
+# set softwrap          # Display long lines over multiple lines.
+# set speller           "program [argument ...]" # Use the given program to do spell checking
+# set spotlightcolor    [bold,][italic,]fgcolor,bgcolor
+# set stateflags
+# set statuscolor       [bold,][italic,]fgcolor,bgcolor
+# set stripecolor       [bold,][italic,]fgcolor,bgcolor
+# set tabstospaces      # Convert each typed tab to spaces.
+# set titlecolor        [bold,][italic,]fgcolor,bgcolor
+# set unix              # Save a file by default in Unix format.
+# set zero              # Hide all elements of the interface
+
+unbind ^C main          # Currunt cursor position
+# unbind ^U main
+# unbind ^W main
+
+bind ^Z undo main
+bind ^Y redo main
+bind ^C copy main
+bind ^V paste main
+bind ^Q suspend main
+bind ^X quit main
+bind ^S writeout main
+bind ^Space mark main
+bind ^H help main
+bind ^F whereis main
+bind ^R replace main
+
+bind M-C cut main            #
+bind M-V paste main          #
+bind M-X suspend main        # 
+bind M-Q findprevious main   # Searches the next occurrence in the backward direction.
+bind M-E findnext main       # Searches the next occurrence in the forward direction.
+
+# bind ^F whereis main
+# bind ^S savefile main
+# bind ^X cut main
+# bind ^O insert main
+# bind ^P prevword main
+# bind ^N nextword main
+# bind ^B firstline main
+# bind ^E lastline main
+# bind ^L curpos main
+# bind ^J gotoline main
+# bind ^V uncut main
+# bind ^G searchagain main
+# bind M-A nohelp main
+# bind M-L constupdate main
+

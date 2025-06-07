@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="AutoImportSettings">
+    <option name="autoReloadType" value="SELECTIVE" />
+  </component>
+  <component name="ChangeListManager">
+    <list default="true" id="a4ba6ee7-3b74-4bfd-bc5f-cd37ae89d485" name="Changes" comment="dev">
+      <change beforePath="$PROJECT_DIR$/vendor/task" beforeDir="false" afterPath="$PROJECT_DIR$/vendor/task" afterDir="false" />
+    </list>
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="ChangesViewManager">
+    <option name="groupingKeys">
+      <option value="directory" />
+      <option value="repository" />
+    </option>
+  </component>
+  <component name="Git.Settings">
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
+  </component>
+  <component name="GitToolBoxStore">
+    <option name="projectConfigVersion" value="5" />
+  </component>
+  <component name="MacroExpansionManager">
+    <option name="directoryName" value="83c1dcd3" />
+  </component>
+  <component name="MarkdownSettingsMigration">
+    <option name="stateVersion" value="1" />
+  </component>
+  <component name="ProjectId" id="2J9vFrBYsH2ZQGRzWwO3F725UIW" />
+  <component name="ProjectLevelVcsManager" settingsEditedManually="true">
+    <ConfirmationsSetting value="2" id="Add" />
+  </component>
+  <component name="ProjectViewState">
+    <option name="compactDirectories" value="true" />
+    <option name="hideEmptyMiddlePackages" value="true" />
+    <option name="showLibraryContents" value="true" />
+  </component>
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "RunOnceActivity.OpenProjectViewOnStart": "true",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "WebServerToolWindowFactoryState": "false",
+    "dart.analysis.tool.window.visible": "false",
+    "git-widget-placeholder": "main",
+    "last_opened_file_path": "A:/Projects/JeanMGirard/incubator/needle",
+    "node.js.detected.package.eslint": "true",
+    "node.js.detected.package.tslint": "true",
+    "node.js.selected.package.eslint": "(autodetect)",
+    "node.js.selected.package.tslint": "(autodetect)",
+    "nodejs_package_manager_path": "npm",
+    "settings.editor.selected.configurable": "reference.settingsdialog.IDE.editor.colors.Language Defaults",
+    "vue.rearranger.settings.migration": "true"
+  },
+  "keyToStringList": {
+    "stardust.markdown.MarkdownSplitEditorSuppressor:keyList": [
+    ]
+  }
+}]]></component>
+  <component name="RecentsManager">
+    <key name="CopyFile.RECENT_KEYS">
+      <recent name="A:\JeanMGirard\scripts\packages\linux-setup-tool" />
+      <recent name="A:\JeanMGirard\scripts\tools\installers" />
+      <recent name="A:\JeanMGirard\scripts" />
+      <recent name="A:\JeanMGirard\scripts\tools" />
+      <recent name="A:\JeanMGirard\scripts\docs" />
+    </key>
+    <key name="MoveFile.RECENT_KEYS">
+      <recent name="A:\Projects\JeanMGirard\scripts\libs\powershell\Azure\Storage" />
+      <recent name="A:\JeanMGirard\scripts\modules" />
+      <recent name="A:\JeanMGirard\scripts\packages\linux-setup-tool" />
+      <recent name="A:\JeanMGirard\scripts\tools" />
+      <recent name="A:\JeanMGirard\scripts\modules\bash" />
+    </key>
+  </component>
+  <component name="SpellCheckerSettings" RuntimeDictionaries="0" Folders="0" CustomDictionaries="0" DefaultDictionary="application-level" UseSingleDictionary="true" transferred="true" />
+  <component name="TaskManager">
+    <task active="true" id="Default" summary="Default task">
+      <changelist id="a4ba6ee7-3b74-4bfd-bc5f-cd37ae89d485" name="Changes" comment="" />
+      <created>1671503013096</created>
+      <option name="number" value="Default" />
+      <option name="presentableId" value="Default" />
+      <updated>1671503013096</updated>
+      <workItem from="1671503016602" duration="91000" />
+      <workItem from="1671503163303" duration="11443000" />
+      <workItem from="1672147650928" duration="7632000" />
+      <workItem from="1682906069224" duration="818000" />
+      <workItem from="1686792941100" duration="2076000" />
+      <workItem from="1686973440318" duration="138000" />
+    </task>
+    <task id="LOCAL-00001" summary="dev">
+      <created>1686805496657</created>
+      <option name="number" value="00001" />
+      <option name="presentableId" value="LOCAL-00001" />
+      <option name="project" value="LOCAL" />
+      <updated>1686805496657</updated>
+    </task>
+    <task id="LOCAL-00002" summary="dev">
+      <created>1686805501223</created>
+      <option name="number" value="00002" />
+      <option name="presentableId" value="LOCAL-00002" />
+      <option name="project" value="LOCAL" />
+      <updated>1686805501223</updated>
+    </task>
+    <task id="LOCAL-00003" summary="dev">
+      <created>1686973522860</created>
+      <option name="number" value="00003" />
+      <option name="presentableId" value="LOCAL-00003" />
+      <option name="project" value="LOCAL" />
+      <updated>1686973522860</updated>
+    </task>
+    <option name="localTasksCounter" value="4" />
+    <servers />
+  </component>
+  <component name="TypeScriptGeneratedFilesManager">
+    <option name="version" value="3" />
+  </component>
+  <component name="Vcs.Log.Tabs.Properties">
+    <option name="TAB_STATES">
+      <map>
+        <entry key="MAIN">
+          <value>
+            <State />
+          </value>
+        </entry>
+      </map>
+    </option>
+  </component>
+  <component name="VcsManagerConfiguration">
+    <MESSAGE value="dev" />
+    <option name="LAST_COMMIT_MESSAGE" value="dev" />
+  </component>
+</project>

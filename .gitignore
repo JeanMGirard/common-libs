@@ -1,3 +1,14 @@
+
+/.env
+/.env*
+*.zip
+*.exe
+.old/
+*dist/
+_classage
+.env*
+
+
 # Logs
 logs
 *.log

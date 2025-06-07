@@ -1,0 +1,15 @@
+---
+image: dtzar/charts-kubectl
+
+.lint:
+  script:
+    - 'charts lint ${CHART_NAME}'
+
+.release:
+  before_script:
+    - 'apk add --no-cache git'
+    - 'charts plugin install https://github.com/chartmuseum/charts-push'
+    - 'charts repo add --username gitlab-ci-token --password ${CI_JOB_TOKEN} ${HELM_PROJECT} ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/charts/stable'
+  script:
+    - 'charts package ${CHART_NAME}'
+    - 'charts cm-push ${CHART_NAME} ${HELM_PROJECT}'

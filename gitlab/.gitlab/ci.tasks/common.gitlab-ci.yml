@@ -1,0 +1,723 @@
+---
+stages:
+  - update
+  - lsif
+  - lint
+  - test
+  - build
+  - publish
+  - deploy
+  - verify
+  - announce
+
+variables:
+  GOPATH: $CI_PROJECT_DIR/.cache/go
+  NO_INSTALL_HOMEBREW: 'true'
+  NO_INSTALL_POETRY: 'true'
+  PIP_CACHE_DIR: '$CI_PROJECT_DIR/.cache/pip'
+  SAST_EXPERIMENTAL_FEATURES: 'true'
+  SECRET_DETECTION_HISTORIC_SCAN: 'true'
+
+cache:
+  key: '${CI_JOB_NAME}'
+  paths:
+    - node_modules
+    - .cache/pip
+    - .pnpm-store
+    - .venv
+
+include:
+  - template: Jobs/License-Scanning.gitlab-ci.yml
+  - template: Security/Container-Scanning.gitlab-ci.yml
+  - template: Security/Dependency-Scanning.gitlab-ci.yml
+  - template: Security/SAST.gitlab-ci.yml
+  - template: Security/Secret-Detection.gitlab-ci.yml
+
+codeclimate:
+  stage: lint
+  image: docker:latest
+  variables:
+    DOCKER_DRIVER: overlay2
+    DOCKER_TLS_CERTDIR: ''
+    GIT_DEPTH: 1
+    NO_INSTALL_HOMEBREW: 'true'
+  services:
+    - docker:dind
+  allow_failure: true
+  rules:
+    - if: $DO_CI == 'false'
+      when: never
+    - if: $CI_COMMIT_BRANCH == 'synchronize'
+      when: never
+    - if: $CI_COMMIT_TAG || $CI_COMMIT_BRANCH
+  needs: []
+  script:
+    - apk add bash
+    - apk add yq
+    - bash start.sh
+    - source "$HOME/.profile"
+    - task ci:codeclimate
+  dependencies: []
+  artifacts:
+    reports:
+      codequality: gl-code-quality-report.json
+
+lint:ansible:
+  stage: lint
+  image:
+    name: megabytelabs/ansible-lint:slim
+    entrypoint: ['']
+  allow_failure: true
+  rules:
+    - if: $DO_CI == 'false'
+      when: never
+    - if: $CI_COMMIT_BRANCH == 'synchronize'
+      when: never
+    - exists:
+        - ansible.cfg
+        - meta/main.yml
+  needs: []
+  variables:
+    GIT_DEPTH: 1
+  script:
+    - set -eo pipefail
+    - mkdir -p ~/.ansible/roles
+    - |
+      if [ -f main.yml ]; then
+        BASE_DIR="$PWD"
+        find ./roles -mindepth 2 -maxdepth 2 -type d -print0 | while read -d $'\0' ROLE_PATH; do
+          ROLE_BASENAME=$(basename "$ROLE_PATH")
+          if [ ! -d "$HOME/.ansible/roles/${ANSIBLE_GALAXY_USERNAME_PREFIX}${ROLE_BASENAME}" ]; then
+            ln -sf "$BASE_DIR/$ROLE_PATH" "$HOME/.ansible/roles/${ANSIBLE_GALAXY_USERNAME_PREFIX}${ROLE_BASENAME}"
+          fi
+        done
+      else
+        ln -s . ~/.ansible/roles/"${ANSIBLE_GALAXY_USERNAME_PREFIX}$(basename $PWD)"
+      fi
+    - ansible-lint --offline
+
+lint:eslint:
+  stage: lint
+  image:
+    name: megabytelabs/eslint:slim
+    entrypoint: ['']
+  allow_failure: true
+  rules:
+    - if: $DO_CI == 'false'
+      when: never
+    - if: $CI_COMMIT_BRANCH == 'synchronize'
+      when: never
+    - exists:
+        - '**/*.{js,jsx,json,toml,ts,tsx,yaml,yml}'
+  needs: []
+  variables:
+    GIT_DEPTH: 1
+  script:
+    - pnpm update eslint-config-strict-mode prettier-config-sexy-mode
+    - pnpx eslint -c package.json --no-eslintrc --format stylish .
+
+lint:flake8:
+  stage: lint
+  image:
+    name: megabytelabs/flake8:slim
+    entrypoint: ['']
+  allow_failure: true
+  rules:
+    - if: $DO_CI == 'false'
+      when: never
+    - if: $CI_COMMIT_BRANCH == 'synchronize'
+      when: never
+    - exists:
+        - '**/*.py'
+  needs: []
+  variables:
+    CONFIG_FILE: flake8.toml
+    CONFIG_URL: https://gitlab.com/megabyte-labs/common/python/-/raw/master/project/.config/flake8.toml
+    GIT_DEPTH: 1
+  script:
+    - if [ ! -f ".config/$CONFIG_FILE" ]; then mkdir -p .config && curl -sSL "$CONFIG_URL" > ".config/$CONFIG_FILE"; fi
+    - flake8 --config .config/flake8.toml .
+
+lint:golang:
+  stage: lint
+  image:
+    name: megabytelabs/golangci-lint:slim
+    entrypoint: ['']
+  allow_failure: true
+  rules:
+    - if: $DO_CI == 'false'
+      when: never
+    - if: $CI_COMMIT_BRANCH == 'synchronize'
+      when: never
+    - exists:
+        - '**/*.go'
+  needs: []
+  variables:
+    CONFIG_FILE: golangci.yml
+    CONFIG_URL: https://gitlab.com/megabyte-labs/common/go/-/raw/master/project/.config/golangci.yml
+    GIT_DEPTH: 1
+  script:
+    - if [ ! -f ".config/$CONFIG_FILE" ]; then mkdir -p .config && curl -sSL "$CONFIG_URL" > ".config/$CONFIG_FILE"; fi
+    - |
+      GO111MODULE=off golangci-lint run -c .config/golangci.yml || EXIT_CODE="$?"
+      if [ "$EXIT_CODE" == '5' ]; then
+        echo "No files matching the patterns defined in the configuration"
+      else
+        exit "$EXIT_CODE"
+      fi
+
+lint:hadolint:
+  stage: lint
+  image:
+    name: megabytelabs/hadolint:slim
+    entrypoint: ['']
+  allow_failure: true
+  rules:
+    - if: $DO_CI == 'false'
+      when: never
+    - if: $CI_COMMIT_BRANCH == 'synchronize'
+      when: never
+    - exists:
+        - Dockerfile
+  needs: []
+  variables:
+    CONFIG_FILE: hadolint.yml
+    CONFIG_URL: https://gitlab.com/megabyte-labs/common/shared/-/raw/master/.config/hadolint.yml
+    GIT_DEPTH: 1
+  script:
+    - if [ ! -f ".config/$CONFIG_FILE" ]; then mkdir -p .config && curl -sSL "$CONFIG_URL" > ".config/$CONFIG_FILE"; fi
+    - hadolint -c .config/hadolint.yml Dockerfile
+
+lint:stylelint:
+  stage: lint
+  image:
+    name: megabytelabs/stylelint:slim
+    entrypoint: ['']
+  allow_failure: true
+  rules:
+    - if: $DO_CI == 'false'
+      when: never
+    - if: $CI_COMMIT_BRANCH == 'synchronize'
+      when: never
+    - exists:
+        - '**/*.{css,scss}'
+  needs: []
+  variables:
+    GIT_DEPTH: 1
+  script:
+    - stylelint "**/*.(css|scss)"
+
+lint:shellcheck:
+  stage: lint
+  image:
+    name: megabytelabs/shellcheck:slim
+    entrypoint: ['']
+  allow_failure: true
+  rules:
+    - if: $DO_CI == 'false'
+      when: never
+    - if: $CI_COMMIT_BRANCH == 'synchronize'
+      when: never
+    - exists:
+        - '**/*.{sh,sh.j2}'
+  needs: []
+  variables:
+    GIT_DEPTH: 1
+  script:
+    - shellcheck
+
+lint:vagrant:
+  stage: lint
+  image:
+    name: megabytelabs/vagrant:slim
+    entrypoint: ['']
+  allow_failure: true
+  rules:
+    - if: $DO_CI == 'false'
+      when: never
+    - if: $CI_COMMIT_BRANCH == 'synchronize'
+      when: never
+    - exists:
+        - Vagrantfile
+  needs: []
+  variables:
+    GIT_DEPTH: 1
+  script:
+    - vagrant validate
+
+lint:yamllint:
+  stage: lint
+  image:
+    name: megabytelabs/yamllint:slim
+    entrypoint: ['']
+  allow_failure: true
+  rules:
+    - if: $DO_CI == 'false'
+      when: never
+    - if: $CI_COMMIT_BRANCH == 'synchronize'
+      when: never
+    - exists:
+        - '**/*.{yaml,yml}'
+  needs: []
+  variables:
+    CONFIG_FILE: yamllint.yml
+    CONFIG_URL: https://gitlab.com/megabyte-labs/common/shared/-/raw/master/.config/yamllint.yml
+    GIT_DEPTH: 1
+  script:
+    - if [ ! -f ".config/$CONFIG_FILE" ]; then mkdir -p .config && curl -sSL "$CONFIG_URL" > ".config/$CONFIG_FILE"; fi
+    - yamllint -c .config/yamllint.yml .
+
+lsif:go:
+  stage: test
+  needs: []
+  allow_failure: true
+  image: sourcegraph/lsif-go:v1
+  rules:
+    - if: $DO_CI == 'false'
+      when: never
+    - if: $CODE_INTELLIGENCE_DISABLED
+      when: never
+    - if: $CI_COMMIT_BRANCH == 'synchronize'
+      when: never
+    - if: $CI_COMMIT_BRANCH
+      exists:
+        - go.mod
+  script:
+    - lsif-go
+  artifacts:
+    reports:
+      lsif: dump.lsif
+
+propagate:groups:
+  stage: publish
+  image: megabytelabs/propagate:slim
+  rules:
+    - if: $REPOSITORY_TYPE == 'documentation' && $PIPELINE_SOURCE == $COMMON_SHARED_PROJECT_ID
+      when: never
+    - if: $DO_CI == 'false'
+      when: never
+    - if: $CI_COMMIT_BRANCH == 'synchronize'
+      when: never
+    - if: $CI_COMMIT_TITLE =~ /^chore.*/
+      when: never
+    - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH && $PROPAGATE_FILES == 'true'
+  needs: []
+  variables:
+    GIT_DEPTH: 1
+  script:
+    - curl -o propagate.sh https://gitlab.com/megabyte-labs/cloud/gitlab-ci/-/raw/master/scripts/propagate-groups.sh
+    - bash propagate.sh
+
+propagate:projects:
+  stage: publish
+  image: megabytelabs/propagate:slim
+  rules:
+    - if: $REPOSITORY_TYPE == 'documentation' && $PIPELINE_SOURCE == $COMMON_SHARED_PROJECT_ID
+      when: never
+    - if: $DO_CI == 'false'
+      when: never
+    - if: $CI_COMMIT_BRANCH == 'synchronize'
+      when: never
+    - if: $CI_COMMIT_TITLE =~ /^chore.*/
+      when: never
+    - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH && $PROPAGATE_FILES == 'true'
+  needs: []
+  variables:
+    GIT_DEPTH: 1
+  script:
+    - curl -o propagate.sh https://gitlab.com/megabyte-labs/cloud/gitlab-ci/-/raw/master/scripts/propagate-projects.sh
+    - bash propagate.sh
+
+test:docker:
+  stage: test
+  image: megabytelabs/docker-test:latest
+  allow_failure: true
+  rules:
+    - if: $DO_CI == 'false'
+      when: never
+    - if: $CI_COMMIT_BRANCH == 'synchronize'
+      when: never
+    - exists:
+        - Dockerfile
+  needs: []
+  variables:
+    GIT_DEPTH: 1
+  script:
+    - task --list > /dev/null && task docker:test || echo "Invalid Taskfile(s)!"
+
+update:project:
+  stage: update
+  image:
+    name: megabytelabs/updater:$UPDATER_IMAGE_TAG_LATEST
+    entrypoint: ['']
+  rules:
+    - if: $DO_CI == 'false'
+      when: never
+    - if: ($CI_PIPELINE_SOURCE == 'pipeline' || $CI_PIPELINE_SOURCE == 'web') && $CI_COMMIT_REF_NAME == 'synchronize'
+  variables:
+    GIT_SUBMODULE_STRATEGY: recursive
+  script:
+    - curl -sSL https://gitlab.com/megabyte-labs/common/shared/-/raw/master/common/start.sh > start.sh
+    - bash start.sh
+    - . "$HOME/.profile"
+    - task update
+
+container_scanning:
+  needs: []
+  rules:
+    - if: $DO_CI == 'false'
+      when: never
+    - if: $CI_COMMIT_BRANCH == 'synchronize'
+      when: never
+    - if: $CONTAINER_SCANNING_DISABLED
+      when: never
+    - if: $CI_COMMIT_BRANCH && $GITLAB_FEATURES =~ /\bcontainer_scanning\b/
+      exists:
+        - Dockerfile
+
+gemnasium-dependency_scanning:
+  needs: []
+  rules:
+    - if: $DO_CI == 'false'
+      when: never
+    - if: $CI_COMMIT_BRANCH == 'synchronize'
+      when: never
+    - if: $DEPENDENCY_SCANNING_DISABLED
+      when: never
+    - if: $DS_EXCLUDED_ANALYZERS =~ /gemnasium([^-]|$)/
+      when: never
+    - if: $CI_COMMIT_BRANCH &&
+          $GITLAB_FEATURES =~ /\bdependency_scanning\b/ &&
+          $DS_DEFAULT_ANALYZERS =~ /gemnasium([^-]|$)/
+      exists:
+        - '{Gemfile.lock,*/Gemfile.lock,*/*/Gemfile.lock}'
+        - '{composer.lock,*/composer.lock,*/*/composer.lock}'
+        - '{gems.locked,*/gems.locked,*/*/gems.locked}'
+        - '{go.sum,*/go.sum,*/*/go.sum}'
+        - '{npm-shrinkwrap.json,*/npm-shrinkwrap.json,*/*/npm-shrinkwrap.json}'
+        - '{package-lock.json,*/package-lock.json,*/*/package-lock.json}'
+        - '{yarn.lock,*/yarn.lock,*/*/yarn.lock}'
+        - '{packages.lock.json,*/packages.lock.json,*/*/packages.lock.json}'
+        - '{conan.lock,*/conan.lock,*/*/conan.lock}'
+  before_script:
+    - |
+      if [ -f local/yarn.lock ] && [ -f local/package-lock.json ]; then
+        rm local/yarn.lock
+      fi
+
+gemnasium-maven-dependency_scanning:
+  needs: []
+  rules:
+    - if: $DO_CI == 'false'
+      when: never
+    - if: $CI_COMMIT_BRANCH == 'synchronize'
+      when: never
+    - if: $DEPENDENCY_SCANNING_DISABLED
+      when: never
+    - if: $DS_EXCLUDED_ANALYZERS =~ /gemnasium-maven/
+      when: never
+    - if: $CI_COMMIT_BRANCH &&
+          $GITLAB_FEATURES =~ /\bdependency_scanning\b/ &&
+          $DS_DEFAULT_ANALYZERS =~ /gemnasium-maven/
+      exists:
+        - '{build.gradle,*/build.gradle,*/*/build.gradle}'
+        - '{build.gradle.kts,*/build.gradle.kts,*/*/build.gradle.kts}'
+        - '{build.sbt,*/build.sbt,*/*/build.sbt}'
+        - '{pom.xml,*/pom.xml,*/*/pom.xml}'
+
+gemnasium-python-dependency_scanning:
+  needs: []
+  rules:
+    - if: $DO_CI == 'false'
+      when: never
+    - if: $CI_COMMIT_BRANCH == 'synchronize'
+      when: never
+    - if: $DEPENDENCY_SCANNING_DISABLED
+      when: never
+    - if: $DS_EXCLUDED_ANALYZERS =~ /gemnasium-python/
+      when: never
+    - if: $CI_COMMIT_BRANCH &&
+          $GITLAB_FEATURES =~ /\bdependency_scanning\b/ &&
+          $DS_DEFAULT_ANALYZERS =~ /gemnasium-python/
+      exists:
+        - '{requirements.txt,*/requirements.txt,*/*/requirements.txt}'
+        - '{requirements.pip,*/requirements.pip,*/*/requirements.pip}'
+        - '{Pipfile,*/Pipfile,*/*/Pipfile}'
+        - '{requires.txt,*/requires.txt,*/*/requires.txt}'
+        - '{setup.py,*/setup.py,*/*/setup.py}'
+    - if: $CI_COMMIT_BRANCH &&
+          $GITLAB_FEATURES =~ /\bdependency_scanning\b/ &&
+          $DS_DEFAULT_ANALYZERS =~ /gemnasium-python/ &&
+          $PIP_REQUIREMENTS_FILE
+
+bundler-audit-dependency_scanning:
+  needs: []
+  rules:
+    - if: $DO_CI == 'false'
+      when: never
+    - if: $CI_COMMIT_BRANCH == 'synchronize'
+      when: never
+    - if: $DEPENDENCY_SCANNING_DISABLED
+      when: never
+    - if: $DS_EXCLUDED_ANALYZERS =~ /bundler-audit/
+      when: never
+    - if: $CI_COMMIT_BRANCH &&
+          $GITLAB_FEATURES =~ /\bdependency_scanning\b/ &&
+          $DS_DEFAULT_ANALYZERS =~ /bundler-audit/
+      exists:
+        - '{Gemfile.lock,*/Gemfile.lock,*/*/Gemfile.lock}'
+
+retire-js-dependency_scanning:
+  needs: []
+  rules:
+    - if: $DO_CI == 'false'
+      when: never
+    - if: $CI_COMMIT_BRANCH == 'synchronize'
+      when: never
+    - if: $DEPENDENCY_SCANNING_DISABLED
+      when: never
+    - if: $DS_EXCLUDED_ANALYZERS =~ /retire.js/
+      when: never
+    - if: $CI_COMMIT_BRANCH &&
+          $GITLAB_FEATURES =~ /\bdependency_scanning\b/ &&
+          $DS_DEFAULT_ANALYZERS =~ /retire.js/
+      exists:
+        - '{package.json,*/package.json,*/*/package.json}'
+
+license_scanning:
+  needs: []
+  rules:
+    - if: $DO_CI == 'false'
+      when: never
+    - if: $CI_COMMIT_BRANCH == 'synchronize'
+      when: never
+    - if: $LICENSE_MANAGEMENT_DISABLED
+      when: never
+    - if: $CI_COMMIT_BRANCH && $GITLAB_FEATURES =~ /\blicense_scanning\b/
+  before_script:
+    - |
+      if [ -f local/package-lock.json ]; then
+        cp local/package-lock.json package-lock.json
+      fi
+    - |
+      if [ -f local/requirements.txt ]; then
+        cp local/requirements.txt requirements.txt
+      fi
+
+secret_detection:
+  needs: []
+  rules:
+    - if: $DO_CI == 'false'
+      when: never
+    - if: $CI_COMMIT_BRANCH == 'synchronize'
+      when: never
+    - if: $SECRET_DETECTION_DISABLED
+      when: never
+    - if: $CI_COMMIT_BRANCH
+
+brakeman-sast:
+  needs: []
+  rules:
+    - if: $DO_CI == 'false'
+      when: never
+    - if: $CI_COMMIT_BRANCH == 'synchronize'
+      when: never
+    - if: $SAST_DISABLED
+      when: never
+    - if: $SAST_EXCLUDED_ANALYZERS =~ /brakeman/
+      when: never
+    - if: $CI_COMMIT_BRANCH
+      exists:
+        - '**/*.rb'
+        - '**/Gemfile'
+
+flawfinder-sast:
+  needs: []
+  rules:
+    - if: $DO_CI == 'false'
+      when: never
+    - if: $CI_COMMIT_BRANCH == 'synchronize'
+      when: never
+    - if: $SAST_DISABLED
+      when: never
+    - if: $SAST_EXCLUDED_ANALYZERS =~ /flawfinder/
+      when: never
+    - if: $CI_COMMIT_BRANCH
+      exists:
+        - '**/*.c'
+        - '**/*.cpp'
+
+kubesec-sast:
+  needs: []
+  rules:
+    - if: $DO_CI == 'false'
+      when: never
+    - if: $CI_COMMIT_BRANCH == 'synchronize'
+      when: never
+    - if: $SAST_DISABLED
+      when: never
+    - if: $SAST_EXCLUDED_ANALYZERS =~ /kubesec/
+      when: never
+    - if: $CI_COMMIT_BRANCH &&
+          $SCAN_KUBERNETES_MANIFESTS == 'true'
+
+mobsf-android-sast:
+  needs: []
+  rules:
+    - if: $DO_CI == 'false'
+      when: never
+    - if: $CI_COMMIT_BRANCH == 'synchronize'
+      when: never
+    - if: $SAST_DISABLED
+      when: never
+    - if: $SAST_EXCLUDED_ANALYZERS =~ /mobsf/
+      when: never
+    - if: $CI_COMMIT_BRANCH &&
+          $SAST_EXPERIMENTAL_FEATURES == 'true'
+      exists:
+        - '**/*.apk'
+        - '**/AndroidManifest.xml'
+
+mobsf-ios-sast:
+  needs: []
+  rules:
+    - if: $DO_CI == 'false'
+      when: never
+    - if: $CI_COMMIT_BRANCH == 'synchronize'
+      when: never
+    - if: $SAST_DISABLED
+      when: never
+    - if: $SAST_EXCLUDED_ANALYZERS =~ /mobsf/
+      when: never
+    - if: $CI_COMMIT_BRANCH &&
+          $SAST_EXPERIMENTAL_FEATURES == 'true'
+      exists:
+        - '**/*.ipa'
+        - '**/*.xcodeproj/*'
+
+nodejs-scan-sast:
+  needs: []
+  rules:
+    - if: $DO_CI == 'false'
+      when: never
+    - if: $CI_COMMIT_BRANCH == 'synchronize'
+      when: never
+    - if: $SAST_DISABLED
+      when: never
+    - if: $SAST_EXCLUDED_ANALYZERS =~ /nodejs-scan/
+      when: never
+    - if: $CI_COMMIT_BRANCH
+      exists:
+        - '**/package.json'
+
+phpcs-security-audit-sast:
+  needs: []
+  rules:
+    - if: $DO_CI == 'false'
+      when: never
+    - if: $CI_COMMIT_BRANCH == 'synchronize'
+      when: never
+    - if: $SAST_DISABLED
+      when: never
+    - if: $SAST_EXCLUDED_ANALYZERS =~ /phpcs-security-audit/
+      when: never
+    - if: $CI_COMMIT_BRANCH
+      exists:
+        - '**/*.php'
+
+pmd-apex-sast:
+  needs: []
+  rules:
+    - if: $DO_CI == 'false'
+      when: never
+    - if: $CI_COMMIT_BRANCH == 'synchronize'
+      when: never
+    - if: $SAST_DISABLED
+      when: never
+    - if: $SAST_EXCLUDED_ANALYZERS =~ /pmd-apex/
+      when: never
+    - if: $CI_COMMIT_BRANCH
+      exists:
+        - '**/*.cls'
+
+security-code-scan-sast:
+  needs: []
+  rules:
+    - if: $DO_CI == 'false'
+      when: never
+    - if: $CI_COMMIT_BRANCH == 'synchronize'
+      when: never
+    - if: $SAST_DISABLED
+      when: never
+    - if: $SAST_EXCLUDED_ANALYZERS =~ /security-code-scan/
+      when: never
+    # This rule shim will be removed in %15.0,
+    # See https://gitlab.com/gitlab-org/gitlab/-/issues/350935
+    - if: $CI_COMMIT_BRANCH && $CI_SERVER_VERSION_MAJOR == '14'
+      exists:
+        - '**/*.csproj'
+        - '**/*.vbproj'
+    - if: $CI_COMMIT_BRANCH
+      variables:
+        SAST_ANALYZER_IMAGE_TAG: '3'
+      exists:
+        - '**/*.csproj'
+        - '**/*.vbproj'
+
+semgrep-sast:
+  needs: []
+  rules:
+    - if: $DO_CI == 'false'
+      when: never
+    - if: $CI_COMMIT_BRANCH == 'synchronize'
+      when: never
+    - if: $SAST_DISABLED
+      when: never
+    - if: $SAST_EXCLUDED_ANALYZERS =~ /semgrep/
+      when: never
+    - if: $CI_COMMIT_BRANCH
+      exists:
+        - '**/*.py'
+        - '**/*.js'
+        - '**/*.jsx'
+        - '**/*.ts'
+        - '**/*.tsx'
+        - '**/*.c'
+        - '**/*.go'
+
+sobelow-sast:
+  needs: []
+  rules:
+    - if: $DO_CI == 'false'
+      when: never
+    - if: $CI_COMMIT_BRANCH == 'synchronize'
+      when: never
+    - if: $SAST_DISABLED
+      when: never
+    - if: $SAST_EXCLUDED_ANALYZERS =~ /sobelow/
+      when: never
+    - if: $CI_COMMIT_BRANCH
+      exists:
+        - mix.exs
+
+spotbugs-sast:
+  needs: []
+  rules:
+    - if: $DO_CI == 'false'
+      when: never
+    - if: $CI_COMMIT_BRANCH == 'synchronize'
+      when: never
+    - if: $SAST_EXCLUDED_ANALYZERS =~ /spotbugs/
+      when: never
+    - if: $SAST_EXPERIMENTAL_FEATURES == 'true'
+      exists:
+        - '**/AndroidManifest.xml'
+      when: never
+    - if: $SAST_DISABLED
+      when: never
+    - if: $CI_COMMIT_BRANCH
+      exists:
+        - '**/*.groovy'
+        - '**/*.java'
+        - '**/*.scala'
+        - '**/*.kt'

@@ -1,0 +1,19 @@
+image: gitpod/workspace-postgresql
+
+tasks:
+  - name: Update dependencies
+    before: npm install -g nx @nestjs/cli hygen
+    command: npm install
+    # init: npm install
+
+ports:
+  - name: Api server
+    port: 3000
+    onOpen: open-preview
+
+jetbrain:
+  plugins:
+    - zielu.gittoolbox
+
+vscode:
+  extensions: []

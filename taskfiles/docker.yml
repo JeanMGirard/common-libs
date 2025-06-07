@@ -1,0 +1,913 @@
+---
+
+version: '3'
+env:
+  PREPARE_PROJECT: 'true'
+  UPDATE_GIT_REPOS: 'true'
+
+vars:
+  DIND_MOUNT_MAPPING: /var/run/docker.sock:/var/run/docker.sock
+  DOCKER_BASE_TAG:
+    sh: |
+      if [ -f Dockerfile ] && type jq &> /dev/null; then
+        BASE_TAG="$(jq -r '.blueprint.dockerBaseTag' package.json)"
+        if [ "$BASE_TAG" != 'null' ]; then
+          echo "$BASE_TAG"
+        else
+          if grep -m1 "^FROM .* AS .*" Dockerfile > /dev/null; then
+            FIRST_LINE=$(head -n 1 Dockerfile | sed 's/.* AS \(.*\)/\1/')
+            if [ -n "$FIRST_LINE" ]; then
+              echo "$FIRST_LINE"
+            else
+              echo ""
+            fi
+          else
+            echo ""
+          fi
+        fi
+      fi
+  DOCKER_IMAGE:
+    sh: |
+      if type jq &> /dev/null; then
+        echo "{{.DOCKERHUB_PROFILE}}/$(jq -r '.blueprint.slug' package.json)"
+      fi
+
+  SCENARIO:
+    sh: |
+      {{if .CLI_ARGS}}{{.CLI_ARGS}}{{else}}
+      SCENARIO="$(jq -r '.blueprint.dockerBaseTag' package.json)"
+      if [ "$SCENARIO" != 'null' ]; then
+        echo "$SCENARIO"
+      else
+        echo 'default'
+      fi
+      {{end}}
+
+
+
+  ENV_GOBIN:
+    sh: mktemp
+  ENV_GOROOT:
+    sh: mktemp
+  ENV_PATH:
+    sh: mktemp
+  MAP_FILE: .cache/task-map/Taskfile.json
+  DOCKER_BUILDING:
+    sh: |
+      if [ -f /.dockerenv ] || [ "$container" == 'docker' ]; then
+        if [ -n "$BUILD_DATE" ]; then
+          echo "true"
+        fi
+      fi
+  DOCKER_ENVIRONMENT:
+    sh: |
+      if [ -f /.dockerenv ] || [ "$container" == 'docker' ]; then
+        echo "true"
+      fi
+  ENVIRONMENT_TYPE:
+    sh: |
+      if [ -f /.dockerenv ] || [ "$container" == 'docker' ]; then
+        if [ -n "$BUILD_DATE" ]; then
+          echo "docker-build"
+        else
+          echo "docker"
+        fi
+      else
+        echo "unknown"
+      fi
+
+
+
+
+
+
+tasks:
+  docker:build:
+    desc: Build a regular Docker image and then generate a slim build from it
+    summary: |
+      # Build the Docker Images
+
+      This task will build all of the corresponding Docker images as long as they
+      have a [container-structure-test](https://github.com/GoogleContainerTools/container-structure-test)
+      created.
+
+      For regular projects, having a `Docker.test.yml` container-structure-test is enough. However,
+      for projects with multiple build targets, there should be a test for each target. So, if there
+      are 2 build targets in the `Dockerfile` named `build1` and `build2` then there should be
+      a `Docker.build1.test.yml` and `Docker.build2.test.yml` container-structure-test.
+    hide:
+      sh: '[ ! -f Dockerfile ]'
+    log:
+      error: Encountered error while running Docker build sequence
+      start: Running Docker build sequence
+      success: Finished running Docker build sequence
+    cmds:
+      - task: taskfile:deps
+      - |
+        if [ -d ./test/structure ]; then
+          TESTS="$(find ./test/structure -mindepth 1 -maxdepth 1 -type f -name "*.yml")"
+          if echo "$TESTS" | grep '.yml' > /dev/null; then
+            for TEST_FILE in $TESTS; do
+              TARGET="$(echo "$TEST_FILE" | sed 's/.*\/\([^\/]*\).yml$/\1/')"
+              if [ "$(jq --arg slug "$TARGET" '.blueprint.dockerSlimCommand | type' package.json)" == 'object' ]; then
+                if [ "$(jq --arg slug "$TARGET" '.blueprint.dockerSlimCommand[$slug]' package.json)" != 'null' ]; then
+                  task docker:build:slim -- "$TARGET"
+                else
+                  .config/log warn 'The `.blueprint.dockerSlimCommand` is missing - skipping slim build and building just a regular image'
+                  task docker:build:fat -- "$TARGET"
+                fi
+              else
+                if [ "$(jq --arg slug "$TARGET" '.blueprint.dockerSlimCommand' package.json)" != 'null' ]; then
+                  task docker:build:slim -- "$TARGET"
+                else
+                  task docker:build:fat -- "$TARGET"
+                fi
+              fi
+            done
+          else
+            .config/log error 'The `./test/structure` folder is present but there are no container-structure-tests in it. Add tests \
+            for each build target in the `Dockerfile` that you would like to generate an image for.'
+            exit 1
+          fi
+        else
+          .config/log info 'No `./test/structure` folder is present so assuming there is only one build target'
+          if [ "$(jq -r '.blueprint.dockerSlimCommand' package.json)" != null ]; then
+            .config/log info '`.blueprint.dockerSlimCommand` is present in `package.json` so building both a `latest` and `slim` image'
+            task docker:build:slim
+          else
+            task docker:build:fat
+          fi
+        fi
+    preconditions:
+      - sh: test -f Dockerfile
+        msg: The `Dockerfile` must be present in order to build it
+  docker:login:
+    deps:
+      - :install:software:docker
+    log:
+      error: Failed to authenticate `{{.DOCKERHUB_USER}}` with the DockerHub registry
+      start: Logging into DockerHub registry with `{{.DOCKERHUB_USER}}`
+      success: Authenticated to DockerHub registry with `{{.DOCKERHUB_USER}}`
+    cmds:
+      - echo "$DOCKERHUB_REGISTRY_PASSWORD" | docker login -u {{.DOCKERHUB_USER}} --password-stdin
+    preconditions:
+      - test -n "$DOCKERHUB_REGISTRY_PASSWORD"
+  docker:prepare:
+    cmds:
+      - task: build
+    status:
+      - '[ ! -f Dockerfile ]'
+  docker:publish:
+    desc: Publish the Docker images (using `Docker*.test.yml` files)
+    hide:
+      sh: '[ ! -f Dockerfile ]'
+    summary: |
+      # Publish the Docker Images
+
+      This task will publish all of the corresponding Docker images as long as they
+      have a [container-structure-test](https://github.com/GoogleContainerTools/container-structure-test)
+      created.
+
+      For regular projects, having a `Docker.test.yml` container-structure-test is enough. However,
+      for projects with multiple build targets, there should be a test for each target. So, if there
+      are 2 build targets in the `Dockerfile` named `build1` and `build2` then there should be
+      a `Docker.build1.test.yml` and `Docker.build2.test.yml` container-structure-test.
+    cmds:
+      - |
+        if [ -d ./test/structure ]; then
+          TESTS="$(find ./test/structure -mindepth 1 -maxdepth 1 -type f -name "*.yml")"
+          if echo "$TESTS" | grep '.yml'; then
+            for TEST_FILE in $TESTS; do
+              TARGET="$(echo "$TEST_FILE" | sed 's/.*\/\([^\/]*\).yml$/\1/')"
+              task docker:publish:images -- "$TARGET"
+            done
+          else
+            .config/log error 'The `./test/structure` folder is present but there are no container-structure-tests in it. Add tests \
+            for each build target in the `Dockerfile` that you would like to generate an image for.'
+            exit 1
+          fi
+        else
+          .config/log info 'No `./test/structure` folder is present so assuming there is only one build target'
+          task docker:publish:images
+        fi
+      - task: pushrm
+    status:
+      - '[ ! -f Dockerfile ]'
+  docker:publish:image:
+    vars:
+      SLIM_ENABLED:
+        sh: |
+          TYPE="$(jq -r '.blueprint.dockerSlimCommand | type' package.json)"
+          if [ "$TYPE" != 'object' ]; then
+            jq -r '.blueprint.dockerSlimCommand' package.json | sed 's/null/false/'
+          else
+            TARGET="{{if .CLI_ARGS}}{{.CLI_ARGS}}{{else}}{{.TARGET}}{{end}}"
+            jq --arg target "$TARGET" -r '.blueprint.dockerSlimCommand[$target]' package.json | sed 's/null/false/'
+          fi
+    log:
+      error: Failed to tag / push `{{.DOCKER_IMAGE}}:{{.TARGET_TAG}}`
+      start: Tagging and pushing `{{.DOCKER_IMAGE}}:{{.TARGET_TAG}}`
+      success: Finished uploading `{{.DOCKER_IMAGE}}:{{.TARGET_TAG}}`
+    cmds:
+      - docker tag {{.DOCKER_IMAGE}}:{{.SOURCE_TAG}} {{.DOCKER_IMAGE}}:{{.TARGET_TAG}}
+      - docker push {{.DOCKER_IMAGE}}:{{.TARGET_TAG}}
+    status:
+      - '[[ "{{.SOURCE_TAG}}" == "slim"* ]]'
+      - '[[ "{{.SLIM_ENABLED}}" == "false" ]]'
+  docker:publish:images:
+    vars:
+      MAJOR_VERSION:
+        sh: jq -r '.version' package.json | sed 's/\..*\..*$//'
+      MINOR_VERSION:
+        sh: jq -r '.version' package.json | sed 's/^[^\.]*\.//' | sed 's/\.[^\.]*$//'
+      TAG_POST: '{{if ne .DOCKER_BASE_TAG .CLI_ARGS}}-{{if (contains "codeclimate" .CLI_ARGS)}}codeclimate{{else}}{{.CLI_ARGS}}{{end}}{{end}}'
+      TARGET: '{{if .CLI_ARGS}}{{.CLI_ARGS}}{{else}}{{.TARGET}}{{end}}'
+      VERSION:
+        sh: jq -r ".version" package.json
+    log:
+      error: An error occurred while publishing the Docker images
+      start: Publishing Docker images
+      success: Finished uploading all Docker images
+    cmds:
+      - task: publish:image
+        vars:
+          SOURCE_TAG: latest{{.TAG_POST}}
+          TARGET_TAG: 'v{{.VERSION}}{{.TAG_POST}}'
+      - task: publish:image
+        vars:
+          SOURCE_TAG: latest{{.TAG_POST}}
+          TARGET_TAG: 'v{{.MAJOR_VERSION}}{{.TAG_POST}}'
+      - task: publish:image
+        vars:
+          SOURCE_TAG: latest{{.TAG_POST}}
+          TARGET_TAG: v{{.MAJOR_VERSION}}.{{.MINOR_VERSION}}{{.TAG_POST}}
+      - task: publish:image
+        vars:
+          SOURCE_TAG: latest{{.TAG_POST}}
+          TARGET_TAG: latest{{.TAG_POST}}
+      - task: publish:image
+        vars:
+          SOURCE_TAG: slim{{.TAG_POST}}
+          TARGET_TAG: 'v{{.VERSION}}-slim{{.TAG_POST}}'
+      - task: publish:image
+        vars:
+          SOURCE_TAG: slim{{.TAG_POST}}
+          TARGET_TAG: 'v{{.MAJOR_VERSION}}-slim{{.TAG_POST}}'
+      - task: publish:image
+        vars:
+          SOURCE_TAG: slim{{.TAG_POST}}
+          TARGET_TAG: v{{.MAJOR_VERSION}}.{{.MINOR_VERSION}}-slim{{.TAG_POST}}
+      - task: publish:image
+        vars:
+          SOURCE_TAG: slim{{.TAG_POST}}
+          TARGET_TAG: slim{{.TAG_POST}}
+  docker:pushrm:
+    deps:
+      - :install:github:docker-pushrm
+      - :install:software:docker
+    vars:
+      DOCKERHUB_DESCRIPTION:
+        sh: jq -r '.description' package.json
+    cmds:
+      - docker pushrm {{.DOCKER_IMAGE}}
+      - docker pushrm --short '{{.DOCKERHUB_DESCRIPTION}}' {{.DOCKER_IMAGE}}
+  docker:shell:
+    deps:
+      - :install:software:docker
+      - :install:software:jq
+    interactive: true
+    desc: Open the terminal of an existing Docker image
+    hide:
+      sh: '[ ! -f Dockerfile ]'
+    summary: |
+      # Shell into Docker Image
+
+      This task will start a shell session with one of the Docker images
+      that are currently present on machine. The task looks at the output
+      from `docker images` and filters the list based on the project's
+      expected DockerHub slug or a string, if you pass in CLI arguments.
+
+      **Displays a list of images that match the name in package.json:**
+      `task docker:shell`
+
+      **Displays a list of images that have the pattern abc in their name:**
+      `task docker:shell -- 'abc'`
+    vars:
+      IMAGE_OPTIONS:
+        sh: docker images | grep {{.DOCKER_IMAGE}} | sed 's/^\([^ ]*\).*$/\1/' | jq -Rsc 'split("\n")' | jq 'del(.[-1])'
+    prompt:
+      type: select
+      message: Which Docker image would you like to shell into?
+      options: '{{.IMAGE_OPTIONS}}'
+      answer:
+        cmds:
+          - docker run -v "${PWD}:/work" -w /work -it --entrypoint /bin/sh --rm {{.ANSWER}}
+  docker:taskfile:deps:
+    vars:
+      DOCKER_TASKS_TAG:
+        sh: jq -r '.blueprint.dockerTasksTag' package.json
+    cmds:
+      - task: :common:util:task:tag:deps
+        vars:
+          TAG: '{{.DOCKER_TASKS_TAG}}'
+    status:
+      - '[ "{{.DOCKER_TASKS_TAG}}" == "null" ]'
+  test:
+    deps:
+      - :install:software:docker
+    desc: Perform all available tests on the Docker image
+    hide:
+      sh: '[ ! -f Dockerfile ]'
+    summary: |
+      # Test the Docker Images
+
+      This task will publish all of the corresponding Docker images as long as they
+      have a [container-structure-test](https://github.com/GoogleContainerTools/container-structure-test)
+      created.
+
+      For regular projects, having a `Docker.test.yml` container-structure-test is enough. However,
+      for projects with multiple build targets, there should be a test for each target. So, if there
+      are 2 build targets in the `Dockerfile` named `build1` and `build2` then there should be
+      a `Docker.build1.test.yml` and `Docker.build2.test.yml` container-structure-test.
+
+      ## Comparing Slim Output to Latest Output
+
+      If the `dockerSlimCommand` is present in the `blueprint` section of `package.json`, the output from running
+      `npm run test:dockerslim` on every project/folder in the `test-output/` folder will be compared. The comparison
+      will ensure that the `slim` output matches the `latest` output. Each folder in the `test-output/` folder must
+      have a `package.json` file present with the `test:dockerslim` script defined under `scripts`.
+
+      If there is no `test-output/` folder, then this kind of test is skipped.
+
+      ## `dockerSlimCommand` with Multiple Build Targets
+
+      If there are multiple build targets, then the `dockerSlimCommand` should be an object with keys equal to
+      the build targets and values equal to the appropriate DockerSlim command. If you are only using
+      `Docker.test.yml` then you can simply set `dockerSlimCommand` equal to the appropriate command. However,
+      if you have two targets named `build1` and `build2`, then your `dockerSlimCommand` should look something
+      like:
+
+      ```json
+      {
+        "blueprint": {
+          "dockerSlimCommand": {
+            "build1": "...DockerSlim build command options here for build1",
+            "build2": "...DockerSlim build command options here for build2"
+          }
+        }
+      }
+      ```
+
+      ## CodeClimate CLI Testing
+
+      Any folder in the `test/` folder that starts with `codeclimate` gets scanned by CodeClimate CLI.
+    log:
+      error: Encountered error during Docker test sequence
+      start: Initiating Docker test sequence
+      success: Successfully completed Docker test sequence
+    cmds:
+      - task: :docker:test:container-structure-tests
+      - task: :docker:test:output
+      - task: :docker:test:codeclimate
+      - task: :docker:test:gitlab-runner
+  verify:
+    cmds:
+      - task: login
+  version:software:
+    cmds:
+      - |
+        if grep -q "CMD.\[\"--version\"\]" Dockerfile; then
+          VERSION=$(docker run --cap-drop=ALL -e PY_COLORS=0 --rm {{.DOCKER_IMAGE}}:latest | perl \
+            -pe 'if(($v)=/([0-9]+([.][0-9]+)+)/){print"$v";exit}$_=""')
+          if [[ $VERSION == *.*.* ]]; then
+            echo $VERSION
+          elif [[ $VERSION == *.* ]]; then
+            echo $VERSION.0
+          fi
+        fi
+
+
+
+  codeclimate:
+    cmds:
+      - |
+        if [ -d ./test ]; then
+          TEST_FOLDERS="$(find ./test -mindepth 1 -maxdepth 1 -type d)"
+          if echo "$TEST_FOLDERS" | grep '/test/'; then
+            CURR_DIR="$PWD"
+            for TEST_DIR in $TEST_FOLDERS; do
+              if [ -f "${TEST_DIR}/.codeclimate.yml" ]; then
+                RAN_CODECLIMATE=true
+                cd "$TEST_DIR"
+                task lint:codeclimate
+                cd "$PWD"
+              fi
+            done
+            if [ -z "$RAN_CODECLIMATE" ]; then
+              .config/log warn 'None of the folders in the `./test` directory contained a `.codeclimate.yml` file so CodeClimate was not tested'
+            fi
+          fi
+        fi
+    status:
+      - '[[ "$(docker images -q {{.IMAGE_NAME}}:latest-codeclimate 2> /dev/null)" == "" ]]'
+      - '[[ "$(docker images -q {{.IMAGE_NAME}}:slim-codeclimate 2>/dev/null)" == "" ]]'
+  container-structure-test:
+    desc: Runs ContainerStructureTest for Dockerfile build
+    hide:
+      sh: '[ ! -d ./test/structure ] || ! find ./test/structure -mindepth 1 -maxdepth 1 -name "*.yml" | grep .yml'
+    cmds:
+      - task: container-structure-test:latest
+      - task: container-structure-test:slim
+  container-structure-test:latest:
+    deps:
+      - :install:software:container-structure-test
+      - :install:software:docker
+    vars:
+      TAG_POST: '{{if ne .DOCKER_BASE_TAG .CLI_ARGS}}-{{.CLI_ARGS}}{{end}}'
+    log:
+      error: '`container-structure-test` reported error(s) when testing
+        `{{.DOCKERHUB_PROFILE}}/{{.SLUG}}:latest{{.TAG_POST}}`'
+      start: Testing the `{{.DOCKERHUB_PROFILE}}/{{.SLUG}}:latest`
+        Docker image with `container-structure-test{{.TAG_POST}}`
+      success: '`{{.DOCKERHUB_PROFILE}}/{{.SLUG}}:latest{{.TAG_POST}}` was
+        successfully validated by `container-structure-test`'
+    cmds:
+      - container-structure-test test --image {{.DOCKERHUB_PROFILE}}/{{.SLUG}}:latest{{.TAG_POST}} --config ./test/structure/{{.SCENARIO}}.yml
+    status:
+      - '[[ "$(docker images -q {{.DOCKERHUB_PROFILE}}/{{.SLUG}}:latest{{.TAG_POST}} 2>/dev/null)" == "" ]] | [ ! -f ./test/structure/{{.SCENARIO}}.yml ]'
+  container-structure-test:slim:
+    deps:
+      - :install:software:container-structure-test
+      - :install:software:docker
+    vars:
+      TAG_POST: '{{if ne .DOCKER_BASE_TAG .CLI_ARGS}}-{{.CLI_ARGS}}{{end}}'
+    log:
+      error: '`container-structure-test` reported error(s) when testing
+        `{{.DOCKERHUB_PROFILE}}/{{.SLUG}}:slim{{.TAG_POST}}`'
+      start: Testing the `{{.DOCKERHUB_PROFILE}}/{{.SLUG}}:slim{{.TAG_POST}}`
+        Docker image with `container-structure-test`
+      success: '`{{.DOCKERHUB_PROFILE}}/{{.SLUG}}:slim{{.TAG_POST}}` was
+        successfully validated by `container-structure-test`'
+    cmds:
+      - container-structure-test test --image {{.DOCKERHUB_PROFILE}}/{{.SLUG}}:slim{{.TAG_POST}} --config ./test/structure/{{.SCENARIO}}.yml
+    status:
+      - '[[ "$(docker images -q {{.DOCKERHUB_PROFILE}}/{{.SLUG}}:slim{{.TAG_POST}} 2> /dev/null)" == "" ]] | [ ! -f ./test/structure/{{.SCENARIO}}.yml ]'
+  container-structure-tests:
+    cmds:
+      - |
+        if [ -d ./test/structure ]; then
+          TESTS="$(find ./test/structure -mindepth 1 -maxdepth 1 -name "*.yml")"
+          if echo "$TESTS" | grep '.yml'; then
+            for TEST_FILE in $TESTS; do
+              TARGET="$(echo "$TEST_FILE" | sed 's/.*\/\([^\/]*\).yml$/\1/')"
+              task docker:test:container-structure-test -- "$TARGET"
+            done
+          else
+            .config/log error 'The `./test/structure` folder is present but there are no container-structure-tests in it. Add tests \
+            for each build target in the `Dockerfile` that you would like to generate an image for.'
+            exit 1
+          fi
+        else
+          .config/log warn 'No tests are defined in `./test/structure` so no container-structure-tests will be performed'
+        fi
+
+  gitlab-runner:
+    deps:
+      - :install:software:docker
+      - :install:software:gitlab-runner
+      - :install:software:jq
+      - :install:software:yq
+    env:
+      CI_TESTS:
+        sh: yq e 'keys | .[] | select( . | test("integration"))' .gitlab-ci.yml
+    log:
+      error: Error encountered while validating with the integration tests in `.gitlab-ci.yml`
+      start: Running integration tests defined in `.gitlab-ci.yml`
+      success: Successfully passed the integration tests defined in `.gitlab-ci.yml`
+    cmds:
+      - |
+        for CI_TEST in $CI_TESTS; do
+          export CI_TEST
+          if [ "$(yq e '.[strenv(CI_TEST)].image' .gitlab-ci.yml)" != 'null' ]; then
+            .config/log info 'Simulating the `'"$CI_TEST"'` job in `.gitlab-ci.yml`'
+            gitlab-runner exec "$CI_TEST"
+            .config/log success 'Successfully ran the `'"$CI_TEST"'` job in `.gitlab-ci.yml`'
+          else
+            .config/log warn "$CI_TEST does not appear to be an option with an image in .gitlab-ci.yml"
+          fi
+        done
+    status:
+      - >
+        ! yq e 'keys | .[] | select( . | test("integration"))' .gitlab-ci.yml | grep 'integration:' > /dev/null
+
+  output:
+    deps:
+      - :install:software:docker
+    desc: For each folder matching `./test/output*`, ensure slim and latest output match with default command
+    summary: |
+      # Ensure Identical Output
+
+      This task ensures the output of the default command is identical for both the latest and slim images.
+      If both of the command's outputs match, then that is a good indicator that the slim image is
+      behaiving like the latest image. The test is performed on each project folder in the `test-output/` folder.
+    vars:
+      DIND_MOUNT:
+        sh: |
+          if [ "$(jq -r '.blueprint.dockerInDocker' package.json)" == 'true' ]; then
+            echo "-v {{.DIND_MOUNT_MAPPING}} "
+          fi
+      MOUNT_PATH: '{{if .CLI_ARGS}}{{.CLI_ARGS}}{{else}}${PWD}{{end}}'
+      OUTPUT_COMMAND:
+        sh: |
+          BP_OUTPUT="$(jq -r '.blueprint.dockerOutputCommand' package.json)"
+          if [ "$BP_OUTPUT" != 'null' ]; then
+            echo "$BP_OUTPUT"
+          else
+            echo '.'
+          fi
+    hide:
+      sh: '! find ./test -mindepth 1 -maxdepth 1 -type d | grep output'
+    log:
+      error: There was an error while comparing `latest` and `slim` image outputs for `{{.DOCKER_IMAGE}}`
+      start: Comparing outputs of the `latest` and `slim` images for `{{.DOCKER_IMAGE}}`
+      success: The outputs of the `latest` and `slim` images match for `{{.DOCKER_IMAGE}}`!
+    cmds:
+      - |
+        LATEST_OUTPUT=$(docker run -v "{{.MOUNT_PATH}}:/work" -w /work {{.DOCKER_IMAGE}}:latest {{.OUTPUT_COMMAND}})
+        .config/log success 'Acquired `latest` image output for `'"{{.MOUNT_PATH}}"'`'
+        .config/log info 'Acquiring `slim` image output for `'"{{.MOUNT_PATH}}"'`'
+        SLIM_OUTPUT=$(docker run -v "{{.MOUNT_PATH}}:/work" -w /work {{.DOCKER_IMAGE}}:slim {{.OUTPUT_COMMAND}})
+        .config/log success 'Acquired `slim` image output for `'"{{.MOUNT_PATH}}"'`'
+        if [ "$LATEST_OUTPUT" != "$SLIM_OUTPUT" ]; then
+          .config/log error 'The `latest` image output did not match the `slim` image output with the command `{{.OUTPUT_COMMAND}}`'
+          echo "$LATEST_OUTPUT" > latest.log
+          .config/log info 'The `latest` image output has been written to `latest.log`'
+          echo "$SLIM_OUTPUT" > slim.log
+          .config/log info 'The `slim` image output has been written to `slim.log`'
+          exit 1
+        else
+          .config/log success 'The output from the `{{.OUTPUT_COMMAND}}` command generated the same output for both the `slim` and `latest` builds'
+        fi
+
+  outputs:
+    log:
+      error: Error intitializing Docker output tests
+      start: Initializing Docker output test phase
+      success: Completed Docker output test phase
+    cmds:
+      - |
+        if [ -d test ]; then
+          TESTS="$(find ./test -mindepth 1 -maxdepth 1 -type d -name "output-*")"
+          if echo "$TESTS" | grep 'output'; then
+            for TEST_FILE in $TESTS; do
+              TARGET="$(echo "$TEST_FILE" | sed 's/.*\/\([^\/]*\).yml$/\1/')"
+              task docker:test:output -- "$TARGET"
+            done
+          else
+            .config/log info 'No folders matching `test/output*` were found so output comparison test is being skipped'
+          fi
+        else
+          .config/log info 'No `./test` folder. See the `docs/CONTRIBUTING.md` to see how to set up the tests for Docker image builds'
+        fi
+    status:
+      - '(! find ./test -mindepth 1 -maxdepth 1 -type d -name "output-*" | grep output-)
+        || [[ "$(docker images -q {{.IMAGE_NAME}}:slim 2> /dev/null)" == "" ]]
+        || [[ "$(docker images -q {{.IMAGE_NAME}}:latest 2>/dev/null)" == "" ]]'
+
+
+
+  docker:labels:
+    deps:
+      - :install:software:jq
+    vars:
+      GROUP_URL:
+        sh: jq -r '.repository.group.dockerfile' .variables.json
+    log:
+      start: Ensuring `Dockerfile` labels are up-to-date
+      success: '`Dockerfile` labels are up-to-date'
+    cmds:
+      - task: labels:add
+      - task: labels:update
+    sources:
+      - .variables.json
+      - Dockerfile
+      - package.json
+    preconditions:
+      - sh: test -f Dockerfile
+        msg: A `Dockerfile` is not present in the root of this project!
+      - sh: test -f .variables.json
+        msg: The `.variables.json` file is not present in the root of this project!
+      - sh: test -f package.json
+        msg: The `package.json` file is not present in the root of this project!
+  docker:labels:add:
+    vars:
+      AUTHORS:
+        sh: jq -r '.docker_label_authors' .variables.json
+      DESCRIPTION:
+        sh: jq -r '.description' package.json
+      HELP_EMAIL:
+        sh: jq -r '.email.help' .variables.json
+      LICENSE:
+        sh: jq -r '.license' .variables.json
+      ORGANIZATION:
+        sh: jq -r '.organization' .variables.json
+      SOURCE:
+        sh: jq -r '.blueprint.repository.github' package.json
+      URL:
+        sh: jq -r '.link.home' .variables.json
+    log:
+      error: Failed to add Dockerfile labels
+      start: Ensuring default Dockerfile labels are present (e.g. `org.opencontainers.image` tags)
+      success: Successfully injected `org.opencontainers.image` labels into Dockerfile
+    cmds:
+      - |
+        echo 'ARG BUILD_DATE' >> Dockerfile
+        echo 'ARG REVISION' >> Dockerfile
+        echo 'ARG VERSION' >> Dockerfile
+        echo '' >> Dockerfile
+        echo 'LABEL maintainer="{{.ORGANIZATION}} <{{.HELP_EMAIL}}>"' >> Dockerfile
+        echo 'LABEL org.opencontainers.image.authors="{{.AUTHORS}}"' >> Dockerfile
+        echo 'LABEL org.opencontainers.image.created=$BUILD_DATE' >> Dockerfile
+        echo 'LABEL org.opencontainers.image.description="{{.DESCRIPTION}}"' >> Dockerfile
+        echo 'LABEL org.opencontainers.image.documentation="{{.SOURCE}}/blob/master/README.md"' >> Dockerfile
+        echo 'LABEL org.opencontainers.image.licenses="{{.LICENSE}}"' >> Dockerfile
+        echo 'LABEL org.opencontainers.image.revision=$REVISION' >> Dockerfile
+        echo 'LABEL org.opencontainers.image.source="{{.SOURCE}}"' >> Dockerfile
+        echo 'LABEL org.opencontainers.image.url="{{.URL}}"' >> Dockerfile
+        echo 'LABEL org.opencontainers.image.vendor="{{.ORGANIZATION}}"' >> Dockerfile
+        echo 'LABEL org.opencontainers.image.version=$VERSION' >> Dockerfile
+        echo 'LABEL space.megabyte.type="{{.REPOSITORY_SUBTYPE}}"' >> Dockerfile
+        echo '' >> Dockerfile
+    status:
+      - grep 'org.opencontainers.image.documentation' Dockerfile
+  docker:labels:update:
+    vars:
+      AUTHORS:
+        sh: jq -r '.docker_label_authors' .variables.json
+      CMD_PREFIX: sed -i{{if (eq OS "darwin")}} .bak{{end}}
+      GROUP_URL:
+        sh: jq -r '.repository.group.dockerfile' .variables.json
+      LICENSE:
+        sh: jq -r '.license' .variables.json
+      ORGANIZATION:
+        sh: jq -r '.organization' .variables.json
+      URL:
+        sh: jq -r '.link.home' .variables.json
+    env:
+      DESCRIPTION:
+        sh: jq -r '.description' package.json
+      REPOSITORY_GITHUB:
+        sh: jq -r '.blueprint.repository.github' package.json
+    log:
+      error: Encountered error while updating `Dockerfile` labels
+    cmds:
+      - |
+        {{.CMD_PREFIX}} "s^.*org.opencontainers.image.authors.*^LABEL org.opencontainers.image.authors=\"{{.AUTHORS}}\"^g" Dockerfile
+        {{.CMD_PREFIX}} "s^.*org.opencontainers.image.description.*^LABEL org.opencontainers.image.description=\"${DESCRIPTION}\"^g" Dockerfile
+        {{.CMD_PREFIX}} "s^.*org.opencontainers.image.documentation.*^LABEL org.opencontainers.image.documentation=\"${REPOSITORY_GITHUB}/blob/master/README.md\"^g" Dockerfile
+        {{.CMD_PREFIX}} "s^.*org.opencontainers.image.licenses.*^LABEL org.opencontainers.image.licenses=\"{{.LICENSE}}\"^g" Dockerfile
+        {{.CMD_PREFIX}} "s^.*org.opencontainers.image.source.*^LABEL org.opencontainers.image.source=\"${REPOSITORY_GITHUB}.git\"^g" Dockerfile
+        {{.CMD_PREFIX}} "s^.*org.opencontainers.image.url.*^LABEL org.opencontainers.image.url=\"{{.URL}}\"^g" Dockerfile
+        {{.CMD_PREFIX}} "s^.*org.opencontainers.image.vendor.*^LABEL org.opencontainers.image.vendor=\"{{.ORGANIZATION}}\"^g" Dockerfile
+      - rm -f Dockerfile.bak
+  docker:sort:
+    todo: Make this remove duplicates using a command like `uniq -u`
+    log:
+      error: Encountered error while sorting `*.txt` files in the `./local` folder`
+      start: Sorting, removing empty lines, and removing duplicate lines from all `*.txt` files in the `./local` folder
+      success: Successfully sorted `*.txt` files in the `./local` folder
+    cmds:
+      - find ./local -type f -name '*.txt' -exec sort {} -o {} \; -exec sed -i '/^$/d' {} \;
+    status:
+      - '! find ./local -type f -name "*.txt" | grep txt'
+  docker:version:
+    deps:
+      - :install:software:jq
+    vars:
+      VERSION_COMMAND:
+        sh: jq -r '.blueprint.versionCommand' package.json
+    log:
+      error: Error acquiring software version
+      start: Acquiring software version
+      success: Finished software version acquisition sequence
+    cmds:
+      - docker build --tag {{.DOCKER_IMAGE}}:latest  --target "{{.DOCKER_BASE_TAG}}" .
+      - |
+        VERSION="$({{.VERSION_COMMAND}})" || EXIT_CODE=$?
+        if [ -n "$EXIT_CODE" ]; then
+          .config/log warn 'Failed to run version command (`{{.VERSION_COMMAND}}`) - will retry after images are finished building'
+        else
+          CURR_VERSION="$(jq -r '.version' package.json)"
+          TMP="$(mktemp)"
+          jq --arg version "$(jq --arg v "$VERSION" '$v' package.json |  sed 's/^[^0-9]*//' | sed 's/[^0-9]*$//')" '.version = $version' package.json > "$TMP"
+          mv "$TMP" package.json
+          if [ "$CURR_VERSION" != "$(jq -r '.version' package.json)" ]; then
+            .config/log info 'Updating documentation with new software version'
+            task common:update:update
+          fi
+        fi
+    status:
+      - '[ "{{.VERSION_COMMAND}}" == "null" ] || [ "{{.DOCKER_BASE_TAG}}" != "{{.CLI_ARGS}}" ]'
+
+
+  fat:
+    cmds:
+      - task: :docker:update:version
+      - task: fat:build
+  fat:build:
+    deps:
+      - :install:software:docker
+      - :install:software:jq
+    desc: Build a normal Docker container from the Dockerfile
+    summary: |
+      # Build Docker Container from Dockerfile
+
+      This task builds a normal Docker container. It expects the Dockerfile to be
+      named `Dockerfile` and for it to be in the root of the repository.
+
+      For more information on building Docker containers, see
+      [Docker's build guide](https://docs.docker.com/engine/reference/commandline/build/).
+    vars:
+      BUILD_DATE:
+        sh: type git &> /dev/null && git show -s --format=%cI
+      REVISION:
+        sh: type git &> /dev/null && git rev-parse HEAD
+      SLUG:
+        sh: jq -r '.blueprint.slug' package.json
+      TAG_POST: '{{if ne .DOCKER_BASE_TAG .CLI_ARGS}}-{{.CLI_ARGS}}{{end}}'
+      VERSION:
+        sh: jq -r '.version' package.json
+    run: when_changed
+    hide:
+      sh: '[ ! -f Dockerfile ]'
+    log:
+      error: Error building `{{.DOCKER_IMAGE}}:{{.VERSION}}`
+      start: Building Docker container `{{.DOCKER_IMAGE}}:{{.VERSION}}` (also tagged as latest)
+      success: Successfully built Docker container named `{{.DOCKER_IMAGE}}:{{.VERSION}}`
+    cmds:
+      - .config/log info 'Running `docker build --build-arg BUILD_DATE={{.BUILD_DATE}} --build-arg REVISION={{.REVISION}} --build-arg VERSION={{.VERSION}}
+        --tag {{.DOCKER_IMAGE}}:latest{{.TAG_POST}}
+        {{if (contains "codeclimate" .CLI_ARGS)}} --tag codeclimate/codeclimate-{{.SLUG}}{{end}}{{if .CLI_ARGS}}
+        --target {{.CLI_ARGS}}{{end}} .`'
+      - docker build --build-arg BUILD_DATE={{.BUILD_DATE}} --build-arg REVISION={{.REVISION}} --build-arg VERSION={{.VERSION}}
+        --tag {{.DOCKER_IMAGE}}:latest{{.TAG_POST}}
+        {{if (contains "codeclimate" .CLI_ARGS)}} --tag codeclimate/codeclimate-{{.SLUG}}{{end}}
+        {{if .CLI_ARGS}} --target {{.CLI_ARGS}}{{end}} .
+  slim:
+    deps:
+      - :install:software:docker
+      - :install:software:docker-slim
+    desc: Build a slim version of the Docker image
+    hide:
+      sh: '[ ! -f Dockerfile ]'
+    summary: |
+      # Build a compressed and secure container from the `regular` Docker image
+
+      This task takes the Docker container generated by running `task build:normal` and
+      compresses it using DockerSlim. Compressing it actually makes the container more
+      secure too because there is a smaller attack surface with unnecessary tools and services
+      removed.
+
+      For more information, see [DockerSlim's GitHub page](https://github.com/docker-slim/docker-slim).
+    cmds:
+      - task: fat
+      - task: slim:command
+      - task: slim:finish
+  slim:command:
+    vars:
+      DIND_MOUNT:
+        sh: |
+          if [ "$(jq -r '.blueprint.dockerInDocker' package.json)" == 'true' ]; then
+            echo "--mount {{.DIND_MOUNT_MAPPING}} "
+          fi
+      SLIM_COMMAND:
+        sh: |
+          COMMAND_TYPE="$(jq -r '.blueprint.dockerSlimCommand | type' package.json)"
+          if [ "$COMMAND_TYPE" == 'string' ]; then
+            echo "$(jq -r '.blueprint.dockerSlimCommand' package.json)"
+          else
+            COMMAND="$(jq --arg type "{{if .CLI_ARGS}}{{.CLI_ARGS}}{{else}}$(jq -r '.blueprint.slug' package.json){{end}}" \
+            -r '.blueprint.dockerSlimCommand[$type]' package.json)"
+            if [ "$COMMAND" != 'null' ]; then
+              echo "$(jq --arg type "{{if .CLI_ARGS}}{{.CLI_ARGS}}{{else}}$(jq -r '.blueprint.slug' package.json){{end}}" \
+              -r '.blueprint.dockerSlimCommand[$type]' package.json)"
+            fi
+          fi
+      TAG_POST: '{{if ne .DOCKER_BASE_TAG .CLI_ARGS}}-{{.CLI_ARGS}}{{end}}'
+    log:
+      error: Error building `{{.DOCKER_IMAGE}}:slim` with `docker-slim`
+      start: Building Docker container named `{{.DOCKER_IMAGE}}:slim`
+      success: Successfully built Docker container named `{{.DOCKER_IMAGE}}:slim`
+    cmds:
+      - >
+        .config/log info 'Running `docker-slim build {{.DIND_MOUNT}}--tag {{.DOCKER_IMAGE}}:slim{{.TAG_POST}}
+        {{if (contains "codeclimate" .CLI_ARGS)}}--tag codeclimate/codeclimate-{{.SLUG}}:slim {{end}}
+        {{.SLIM_COMMAND | replace "'" "\""}} {{.DOCKER_IMAGE}}:latest{{.TAG_POST}}`'
+      - >
+        docker-slim build {{.DIND_MOUNT}}--tag {{.DOCKER_IMAGE}}:slim{{.TAG_POST}}
+        {{if (contains "codeclimate" .CLI_ARGS)}}--tag codeclimate/codeclimate-{{.SLUG}}:slim {{end}}
+        {{.SLIM_COMMAND | replace "'" "\""}} {{.DOCKER_IMAGE}}:latest{{.TAG_POST}}
+
+  slim:finish:
+    deps:
+      - slim:prettier
+      - slim:sizes
+  slim:prettier:
+    deps:
+      - :install:npm:prettier
+    vars:
+      IMAGE_SLUG:
+        sh: jq -r '.blueprint.slug' package.json
+    log:
+      error: Failed to format `slim.report.json` with Prettier
+      start: Formatting `slim.report.json` with Prettier
+      success: Formatted `slim.report.json` with Prettier
+    cmds:
+      - '{{.NPX_HANDLE}}prettier --write slim.report.json > /dev/null'
+      - mv slim.report.json docs/slim{{if .CLI_ARGS}}.{{.CLI_ARGS}}{{end}}.report.json
+  slim:sizes:
+    cmds:
+      - task: slim:sizes:assets
+      - task: slim:sizes:calculate
+      - task: slim:sizes:clean
+  slim:sizes:assets:
+    deps:
+      - :install:software:docker
+      - :install:software:gzip
+    vars:
+      SLUG:
+        sh: echo "{{if .CLI_ARGS}}{{.CLI_ARGS}}{{else}}$(jq -r '.blueprint.slug' package.json){{end}}"
+      TAG_POST: '{{if ne .DOCKER_BASE_TAG .CLI_ARGS}}-{{.CLI_ARGS}}{{end}}'
+    log:
+      error: Encountered error while generating compressed Docker image tar file
+      start: Generating compressed Docker image tar file(s)
+      success: Successfully generated compressed Docker image tar file(s)
+    cmds:
+      - |
+        function zipUp() {
+          docker save "{{.DOCKER_IMAGE}}:$1{{.TAG_POST}}" > "$1{{.TAG_POST}}.tar"
+          gzip -f "$1{{.TAG_POST}}.tar"
+        }
+        zipUp "latest" &
+        zipUp "slim" &
+        wait
+
+  slim:sizes:calculate:
+    deps:
+      - :install:software:jq
+    vars:
+      DOCKER_IMAGE_SLUG:
+        sh: echo "{{if .CLI_ARGS}}{{.CLI_ARGS}}{{else}}$(jq -r '.blueprint.slug' package.json){{end}}"
+      PREVIOUS_REGULAR_SIZE:
+        sh: jq --arg slug '{{.DOCKER_IMAGE_SLUG}}' -r '.blueprint.dockerLatestSize[$slug]' package.json
+      PREVIOUS_SLIM_SIZE:
+        sh: jq --arg slug '{{.DOCKER_IMAGE_SLUG}}' -r '.blueprint.dockerSlimSize[$slug]' package.json
+      REGULAR_SIZE:
+        sh: stat -c%s latest{{if ne .DOCKER_BASE_TAG .CLI_ARGS}}-{{.CLI_ARGS}}{{end}}.tar.gz | numfmt --to iec
+      SLIM_SIZE:
+        sh: stat -c%s slim{{if ne .DOCKER_BASE_TAG .CLI_ARGS}}-{{.CLI_ARGS}}{{end}}.tar.gz | numfmt --to iec
+    log:
+      error: Failed to acquire / inject `:slim` image file size information into `package.json` blueprint data
+      start: Injecting `:slim` image file size into `package.json` blueprint data
+    cmds:
+      - |
+        TMP="$(mktemp)"
+        jq --arg a '{{.SLIM_SIZE}}' --arg b '{{.REGULAR_SIZE}}' --arg slug '{{.DOCKER_IMAGE_SLUG}}' \
+        '.blueprint.dockerSlimSize[$slug] = $a | .blueprint.dockerLatestSize[$slug] = $b' package.json > "$TMP"
+        mv "$TMP" package.json
+      - task: slim:sizes:clean
+      - task: :common:update:update
+    status:
+      - '[[ "{{.PREVIOUS_SLIM_SIZE}}" == "{{.SLIM_SIZE}}" ]]'
+      - '[[ "{{.PREVIOUS_REGULAR_SIZE}}" == "{{.REGULAR_SIZE}}" ]]'
+  slim:sizes:clean:
+    cmds:
+      - rm -f latest*.tar.gz
+      - rm -f latest*.tar
+      - rm -f slim*.tar.gz
+      - rm -f slim*.tar
+    status:
+      - >
+        ! test -n "$(find . -maxdepth 1 -name '*.tar.gz' -print -quit)"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

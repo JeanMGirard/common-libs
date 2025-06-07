@@ -1,0 +1,40 @@
+
+
+
+
+stages:
+  - build
+  - test
+  - deploy
+  - performance
+  - automated-api-tests
+
+
+automated-api-tests:
+  stage: automated-api-tests
+  image: cimg/base:2021.04
+  before_script:
+    # Installing Postman CLI
+    - curl -o- "https://dl-cli.pstmn.io/install/linux64.sh" | sh
+  script:
+    # Login using your Postman API keys
+    - postman login --with-api-key $POSTMAN_API_KEY
+    - postman collection run "6491837-0b51b16a-f84e-4429-a7cd-29445dddf4e2"
+
+
+load_performance:
+  stage: performance
+  image: docker:git
+  variables:
+    K6_IMAGE: grafana/k6
+    K6_VERSION: 0.41.0
+    K6_TEST_FILE: raw.githubusercontent.com/grafana/k6/master/samples/http_get.js
+    K6_OPTIONS: ''
+    K6_DOCKER_OPTIONS: ''
+  services:
+    - docker:dind
+  script:
+    - docker run --rm -v "$(pwd)":/k6 -w /k6 $K6_DOCKER_OPTIONS $K6_IMAGE:$K6_VERSION run $K6_TEST_FILE --summary-export=load-performance.json $K6_OPTIONS
+  artifacts:
+    reports:
+      load_performance: load-performance.json
